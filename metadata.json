@@ -1,0 +1,5 @@
+{
+  "name": "Pro Football Analytics",
+  "description": "A professional-grade football match analysis dashboard ported to a modern React PWA. Optimized for iOS with mobile-first design, real-time odds tracking, and pre-goal pattern detection using the B365 API.",
+  "requestFramePermissions": []
+}

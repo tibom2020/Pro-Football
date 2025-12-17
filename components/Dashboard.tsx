@@ -1,9 +1,9 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
-import { MatchInfo, OddsData, PreGoalAnalysis, OddsItem } from '../types';
+import { MatchInfo, OddsData, PreGoalAnalysis, OddsItem, ProcessedStats } from '../types';
 import { parseStats, getMatchDetails, getMatchOdds } from '../services/api';
-import { ArrowLeft, RefreshCw, Siren, TrendingUp, Activity, Target } from 'lucide-react';
-import { ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis, ZAxis, Tooltip, Cell, LineChart, Line, Legend, ReferenceLine } from 'recharts';
+import { ArrowLeft, RefreshCw, Siren, TrendingUp, Activity } from 'lucide-react';
+import { ResponsiveContainer, ComposedChart, Scatter, XAxis, YAxis, ZAxis, Tooltip, Cell, Line, Legend } from 'recharts';
 
 interface DashboardProps {
   token: string;
@@ -29,27 +29,35 @@ const getOddsColor = (odds: number): string => {
   return '#f87171';       // Red
 };
 
-const CustomTooltip = ({ active, payload }: any) => {
+const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
-    const data = payload[0].payload;
-    const type = payload[0].name;
-
-    if (type === 'Shots') {
-      return (
-        <div className="bg-slate-800 text-white text-xs p-2 rounded shadow-lg border border-slate-700">
-          <p className="font-bold">Minute: {data.minute}'</p>
-          <p style={{ color: data.fill }} className="font-semibold">Shot: {data.type}</p>
-        </div>
-      );
-    }
+    const minute = label; // The x-axis value (minute)
     
-    // Default to market tooltip
+    // Find data points from different series in the payload
+    const marketData = payload.find(p => p.dataKey === 'handicap')?.payload;
+    const shotData = payload.find(p => p.name === 'Shots')?.payload;
+    const homeApiData = payload.find(p => p.dataKey === 'homeApi');
+    const awayApiData = payload.find(p => p.dataKey === 'awayApi');
+
     return (
-      <div className="bg-slate-800 text-white text-xs p-2 rounded shadow-lg border border-slate-700">
-        <p className="font-bold">Minute: {data.minute}'</p>
-        <p>HDP: {typeof data.handicap === 'number' ? data.handicap.toFixed(2) : '-'}</p>
-        <p className="text-gray-400">Over Odds: {typeof data.over === 'number' ? data.over.toFixed(3) : '-'}</p>
-      </div>
+        <div className="bg-slate-800 text-white text-xs p-2 rounded shadow-lg border border-slate-700">
+            <p className="font-bold">Minute: {minute}'</p>
+            {marketData && (
+                <>
+                    <p>HDP: {typeof marketData.handicap === 'number' ? marketData.handicap.toFixed(2) : '-'}</p>
+                    <p className="text-gray-400">Over Odds: {typeof marketData.over === 'number' ? marketData.over.toFixed(3) : '-'}</p>
+                </>
+            )}
+            {shotData && (
+                <p style={{ color: shotData.fill }} className="font-semibold">Shot: {shotData.type}</p>
+            )}
+            {homeApiData && homeApiData.value !== undefined && (
+                 <p style={{ color: homeApiData.stroke }}>Home API: {homeApiData.value.toFixed(1)}</p>
+            )}
+             {awayApiData && awayApiData.value !== undefined && (
+                 <p style={{ color: awayApiData.stroke }}>Away API: {awayApiData.value.toFixed(1)}</p>
+            )}
+        </div>
     );
   }
   return null;
@@ -76,11 +84,24 @@ const ShotLegend = () => (
     </div>
 );
 
+// --- API Calculation ---
+const calculateAPIScore = (stats: ProcessedStats, sideIndex: 0 | 1): number => {
+    if (!stats) return 0;
+    const onTarget = stats.on_target[sideIndex];
+    const offTarget = stats.off_target[sideIndex];
+    const shots = onTarget + offTarget;
+    const corners = stats.corners[sideIndex];
+    const dangerous = stats.dangerous_attacks[sideIndex];
+    // Formula from original script
+    return (shots * 1.0) + (onTarget * 3.0) + (corners * 0.7) + (dangerous * 0.1);
+};
+
 
 export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) => {
   const [liveMatch, setLiveMatch] = useState<MatchInfo>(match);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [oddsHistory, setOddsHistory] = useState<{ minute: number; over: number; under: number; handicap: string }[]>([]);
+  const [statsHistory, setStatsHistory] = useState<Record<number, ProcessedStats>>({});
   
   const stats = useMemo(() => parseStats(liveMatch.stats), [liveMatch.stats]);
 
@@ -98,6 +119,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
       if (isMounted) {
         if (detailsData) {
           setLiveMatch(detailsData);
+          // NEW: Store stats history
+          const currentTime = detailsData.timer?.tm;
+          if (currentTime && detailsData.stats) {
+            setStatsHistory(prevHistory => ({
+              ...prevHistory,
+              [currentTime]: parseStats(detailsData.stats)
+            }));
+          }
         } else {
           console.log("Match details could not be updated. It might have ended.");
         }
@@ -211,37 +240,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
     }));
   }, [oddsHistory]);
 
-  const chartData = useMemo(() => {
-    const currentMin = parseInt(liveMatch.timer?.tm?.toString() || liveMatch.time || "0");
-    if (currentMin === 0) return [];
-
-    const data = [];
-    const homeBase = stats.dangerous_attacks[0] / Math.max(1, currentMin);
-    const awayBase = stats.dangerous_attacks[1] / Math.max(1, currentMin);
-
-    const homeSeedString = `${match.id}-home-pressure`;
-    let homeSeed = 0;
-    for (let k = 0; k < homeSeedString.length; k++) {
-      homeSeed += homeSeedString.charCodeAt(k) * (k + 1);
-    }
-    const homeRandom = mulberry32(homeSeed);
-
-    const awaySeedString = `${match.id}-away-pressure`;
-    let awaySeed = 0;
-    for (let k = 0; k < awaySeedString.length; k++) {
-      awaySeed += awaySeedString.charCodeAt(k) * (k + 1);
-    }
-    const awayRandom = mulberry32(awaySeed);
-
-    for (let i = 1; i <= currentMin; i++) {
-      data.push({
-        minute: i,
-        homePressure: (homeBase * i) + (homeRandom() * 5),
-        awayPressure: (awayBase * i) + (awayRandom() * 5),
+  const apiChartData = useMemo(() => {
+      const sortedMinutes = Object.keys(statsHistory).map(Number).sort((a, b) => a - b);
+      return sortedMinutes.map(minute => {
+          const statsForMinute = statsHistory[minute];
+          return {
+              minute,
+              homeApi: calculateAPIScore(statsForMinute, 0),
+              awayApi: calculateAPIScore(statsForMinute, 1),
+          };
       });
-    }
-    return data;
-  }, [liveMatch.timer, liveMatch.time, stats, match.id]);
+  }, [statsHistory]);
   
   const shotData = useMemo(() => {
     const currentMin = parseInt(liveMatch.timer?.tm?.toString() || liveMatch.time || "0");
@@ -353,16 +362,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
             </div>
         </div>
 
-        {/* Over/Under Market Chart with Shots */}
-        {marketChartData.length > 0 && (
+        {/* Combined Chart */}
+        {(marketChartData.length > 0 || apiChartData.length > 0) && (
           <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
               <h3 className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
                   <TrendingUp className="w-4 h-4 text-emerald-500" />
-                  Over/Under Market & Shot Timeline
+                  Over/Under Market, Shots & API Timeline
               </h3>
               <div className="h-80 w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                      <ScatterChart margin={{ top: 10, right: 10, bottom: 0, left: -15 }}>
+                      <ComposedChart margin={{ top: 10, right: 10, bottom: 0, left: -15 }}>
                           <XAxis
                               type="number"
                               dataKey="minute"
@@ -375,7 +384,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
                               axisLine={{ stroke: '#e5e7eb' }}
                           />
                           <YAxis
-                              type="number"
+                              yAxisId="left"
                               dataKey="handicap"
                               name="HDP"
                               width={45}
@@ -386,61 +395,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
                               allowDecimals={true}
                               tickCount={8}
                           />
+                          <YAxis
+                            yAxisId="right"
+                            orientation="right"
+                            tick={{ fontSize: 10, fill: '#9ca3af' }}
+                            tickLine={false}
+                            axisLine={{ stroke: '#e5e7eb' }}
+                            width={35}
+                            domain={['dataMin - 5', 'dataMax + 10']}
+                          />
                           <ZAxis type="number" dataKey="z" range={[50, 200]} />
                           <Tooltip cursor={{ strokeDasharray: '3 3' }} content={<CustomTooltip />} />
-                          
-                          <Scatter name="Market" data={marketChartData} fill="#8884d8">
+                          <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}/>
+
+                          <Scatter yAxisId="left" name="Market" data={marketChartData} fill="#8884d8">
                               {marketChartData.map((entry, index) => (
                                   <Cell key={`cell-market-${index}`} fill={getOddsColor(entry.over)} />
                               ))}
                           </Scatter>
 
-                          <Scatter name="Shots" data={shotData} shape="circle">
+                          <Scatter yAxisId="left" name="Shots" data={shotData} shape="circle">
                               {shotData.map((entry, index) => (
                                   <Cell key={`cell-shot-${index}`} fill={entry.fill} />
                               ))}
                           </Scatter>
-                      </ScatterChart>
+                          
+                          <Line yAxisId="right" type="monotone" data={apiChartData} dataKey="homeApi" name="Home API" stroke="#2563eb" strokeWidth={2} dot={false} />
+                          <Line yAxisId="right" type="monotone" data={apiChartData} dataKey="awayApi" name="Away API" stroke="#ea580c" strokeWidth={2} dot={false} />
+                      </ComposedChart>
                   </ResponsiveContainer>
                   <OddsColorLegent />
                   <ShotLegend />
               </div>
           </div>
         )}
-
-        {/* Pressure Chart */}
-        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-            <h3 className="text-sm font-bold text-gray-700 mb-4 flex items-center gap-2">
-                <Activity className="w-4 h-4 text-blue-500" />
-                Pressure Timeline
-            </h3>
-            <div className="h-40 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
-                        <XAxis 
-                            dataKey="minute"
-                            type="number"
-                            domain={[0, 90]}
-                            ticks={[0, 15, 30, 45, 60, 75, 90]}
-                            tick={{ fontSize: 10, fill: '#9ca3af' }}
-                            unit="'"
-                            tickLine={false}
-                            axisLine={{ stroke: '#e5e7eb' }}
-                         />
-                        <YAxis hide domain={['dataMin - 5', 'dataMax + 5']} />
-                        <Tooltip 
-                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} 
-                            labelStyle={{ color: '#6b7280', fontSize: '12px' }} 
-                            formatter={(value: number) => value.toFixed(1)}
-                            labelFormatter={(label) => `Minute: ${label}'`}
-                        />
-                        <Legend wrapperStyle={{ fontSize: '12px' }} />
-                        <Line type="monotone" dataKey="homePressure" stroke="#2563eb" strokeWidth={2} name="Home" dot={false} />
-                        <Line type="monotone" dataKey="awayPressure" stroke="#ea580c" strokeWidth={2} name="Away" dot={false} />
-                    </LineChart>
-                </ResponsiveContainer>
-            </div>
-        </div>
         
         {/* Stats Grid */}
         <div className="grid grid-cols-2 gap-3">

@@ -1,3 +1,4 @@
+
 export interface MatchInfo {
   id: string;
   league: { name: string };

@@ -21,14 +21,6 @@ function mulberry32(a: number) {
   }
 }
 
-const getOddsColor = (odds: number): string => {
-  if (odds < 1.7) return '#4ade80'; // Bright Green
-  if (odds < 1.9) return '#a3e635'; // Lime
-  if (odds < 2.1) return '#facc15'; // Yellow
-  if (odds < 2.3) return '#fb923c'; // Orange
-  return '#f87171';       // Red
-};
-
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     const minute = label; // The x-axis value (minute)
@@ -45,7 +37,12 @@ const CustomTooltip = ({ active, payload, label }: any) => {
             {marketData && (
                 <>
                     <p>HDP: {typeof marketData.handicap === 'number' ? marketData.handicap.toFixed(2) : '-'}</p>
-                    <p className="text-gray-400">Over Odds: {typeof marketData.over === 'number' ? marketData.over.toFixed(3) : '-'}</p>
+                    {marketData.over !== undefined && (
+                        <p className="text-gray-400">Over Odds: {typeof marketData.over === 'number' ? marketData.over.toFixed(3) : '-'}</p>
+                    )}
+                    {marketData.home !== undefined && (
+                         <p className="text-gray-400">Home Odds: {typeof marketData.home === 'number' ? marketData.home.toFixed(3) : '-'}</p>
+                    )}
                 </>
             )}
             {shotData && (
@@ -101,6 +98,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
   const [liveMatch, setLiveMatch] = useState<MatchInfo>(match);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [oddsHistory, setOddsHistory] = useState<{ minute: number; over: number; under: number; handicap: string }[]>([]);
+  const [homeOddsHistory, setHomeOddsHistory] = useState<{ minute: number; home: number; handicap: string }[]>([]);
   const [statsHistory, setStatsHistory] = useState<Record<number, ProcessedStats>>({});
   
   const stats = useMemo(() => parseStats(liveMatch.stats), [liveMatch.stats]);
@@ -131,52 +129,60 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
           console.log("Match details could not be updated. It might have ended.");
         }
         if (oddsData) {
-          const allMarkets = oddsData.results?.odds?.['1_3'];
-          
-          if (allMarkets && allMarkets.length > 0) {
-            // 1. Group all historical markets by minute from their `time_str`
+          // Process Over/Under (1_3)
+          const overMarkets = oddsData.results?.odds?.['1_3'];
+          if (overMarkets && overMarkets.length > 0) {
             const marketsByMinute: { [minute: string]: OddsItem[] } = {};
-            allMarkets.forEach(market => {
+            overMarkets.forEach(market => {
               if (market.time_str && market.over_od && market.under_od && market.handicap) {
-                if (!marketsByMinute[market.time_str]) {
-                  marketsByMinute[market.time_str] = [];
-                }
+                if (!marketsByMinute[market.time_str]) marketsByMinute[market.time_str] = [];
                 marketsByMinute[market.time_str].push(market);
               }
             });
-
-            // 2. For each minute, find the main market (most balanced odds)
             const newHistory: { minute: number; over: number; under: number; handicap: string }[] = [];
             for (const minuteStr in marketsByMinute) {
               const marketsForMinute = marketsByMinute[minuteStr];
               let mainMarket: OddsItem | null = null;
               let minDiff = Infinity;
-
               marketsForMinute.forEach(market => {
-                const over = parseFloat(market.over_od!);
-                const under = parseFloat(market.under_od!);
+                const over = parseFloat(market.over_od!); const under = parseFloat(market.under_od!);
                 if (!isNaN(over) && !isNaN(under)) {
                   const diff = Math.abs(over - under);
-                  if (diff < minDiff) {
-                    minDiff = diff;
-                    mainMarket = market;
-                  }
+                  if (diff < minDiff) { minDiff = diff; mainMarket = market; }
                 }
               });
-
-              if (mainMarket) {
-                newHistory.push({
-                  minute: parseInt(minuteStr),
-                  over: parseFloat(mainMarket.over_od!),
-                  under: parseFloat(mainMarket.under_od!),
-                  handicap: mainMarket.handicap!,
-                });
-              }
+              if (mainMarket) newHistory.push({ minute: parseInt(minuteStr), over: parseFloat(mainMarket.over_od!), under: parseFloat(mainMarket.under_od!), handicap: mainMarket.handicap! });
             }
-            
-            // 3. Sort by minute and update the state
             newHistory.sort((a, b) => a.minute - b.minute);
             setOddsHistory(newHistory);
+          }
+
+          // Process Home/Away (1_2)
+          const homeMarkets = oddsData.results?.odds?.['1_2'];
+          if (homeMarkets && homeMarkets.length > 0) {
+            const marketsByMinute: { [minute: string]: OddsItem[] } = {};
+            homeMarkets.forEach(market => {
+              if (market.time_str && market.home_od && market.away_od && market.handicap) {
+                 if (!marketsByMinute[market.time_str]) marketsByMinute[market.time_str] = [];
+                 marketsByMinute[market.time_str].push(market);
+              }
+            });
+            const newHomeHistory: { minute: number; home: number; handicap: string }[] = [];
+            for (const minuteStr in marketsByMinute) {
+                const marketsForMinute = marketsByMinute[minuteStr];
+                let mainMarket: OddsItem | null = null;
+                let minDiff = Infinity;
+                marketsForMinute.forEach(market => {
+                    const home = parseFloat(market.home_od!); const away = parseFloat(market.away_od!);
+                    if (!isNaN(home) && !isNaN(away)) {
+                        const diff = Math.abs(home - away);
+                        if (diff < minDiff) { minDiff = diff; mainMarket = market; }
+                    }
+                });
+                if (mainMarket) newHomeHistory.push({ minute: parseInt(minuteStr), home: parseFloat(mainMarket.home_od!), handicap: mainMarket.handicap! });
+            }
+            newHomeHistory.sort((a,b) => a.minute - b.minute);
+            setHomeOddsHistory(newHomeHistory);
           }
         }
       }
@@ -185,87 +191,107 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
     fetchData(); // Initial fetch
     const interval = setInterval(fetchData, 20000); // Poll every 20 seconds
 
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
+    return () => { isMounted = false; clearInterval(interval); };
   }, [liveMatch.id, token]);
 
 
   const handleRefresh = async () => {
     if (isRefreshing) return;
     setIsRefreshing(true);
-    
-    const [detailsData] = await Promise.all([
-        getMatchDetails(token, liveMatch.id)
-    ]);
-
+    const [detailsData] = await Promise.all([ getMatchDetails(token, liveMatch.id) ]);
     if (detailsData) setLiveMatch(detailsData);
-    
-    setTimeout(() => setIsRefreshing(false), 500); // Give feedback for a moment
+    setTimeout(() => setIsRefreshing(false), 500);
   };
 
 
-  // Calculate Pre-Goal Probability (Ported logic)
   const analysis: PreGoalAnalysis = useMemo(() => {
     const time = parseInt(liveMatch.timer?.tm?.toString() || liveMatch.time || "0");
     const totalDA = stats.dangerous_attacks[0] + stats.dangerous_attacks[1];
     const totalOT = stats.on_target[0] + stats.on_target[1];
-    
     const attackDensity = (totalDA * 0.5 + totalOT * 2) / Math.max(1, time); 
     const probabilityScore = Math.min(95, Math.max(5, Math.round(attackDensity * 100)));
-
     let level: PreGoalAnalysis['level'] = 'low';
     if (probabilityScore > 80) level = 'very-high';
     else if (probabilityScore > 60) level = 'high';
     else if (probabilityScore > 40) level = 'medium';
-
-    return {
-      score: probabilityScore,
-      level,
-      factors: {
-        apiMomentum: attackDensity,
-        shotCluster: totalOT,
-        pressure: totalDA
-      }
-    };
+    return { score: probabilityScore, level, factors: { apiMomentum: attackDensity, shotCluster: totalOT, pressure: totalDA } };
   }, [stats, liveMatch.time, liveMatch.timer]);
   
   const scoreParts = (liveMatch.ss || "0-0").split("-");
 
   const marketChartData = useMemo(() => {
-    return oddsHistory.map(p => ({
-      ...p,
-      handicap: parseFloat(p.handicap),
-    }));
+    const dataByHandicap: Record<string, { minute: number; over: number; under: number; handicap: string; }[]> = {};
+    oddsHistory.forEach(p => {
+        if (!dataByHandicap[p.handicap]) dataByHandicap[p.handicap] = [];
+        dataByHandicap[p.handicap].push(p);
+    });
+    const finalData: { minute: number; over: number; under: number; handicap: number; color: string; }[] = [];
+    for (const handicapKey in dataByHandicap) {
+        const points = dataByHandicap[handicapKey];
+        const coloredPoints = points.map((point, index) => {
+            let color = '#f87171'; // Default red
+            if (index > 0) {
+                const diff = point.over - points[index - 1].over;
+                if (diff < -0.02) color = '#facc15'; // yellow
+                else if (Math.abs(diff) <= 0.02) color = '#4ade80'; // green
+            }
+            return { ...point, handicap: parseFloat(point.handicap), color: color };
+        });
+        finalData.push(...coloredPoints);
+    }
+    return finalData;
   }, [oddsHistory]);
+
+  const homeMarketChartData = useMemo(() => {
+    const dataByHandicap: Record<string, { minute: number; home: number; handicap: string; }[]> = {};
+    homeOddsHistory.forEach(p => {
+        if (!dataByHandicap[p.handicap]) dataByHandicap[p.handicap] = [];
+        dataByHandicap[p.handicap].push(p);
+    });
+    const finalData: { minute: number; home: number; handicap: number; color: string; }[] = [];
+    for (const handicapKey in dataByHandicap) {
+        const points = dataByHandicap[handicapKey];
+        const coloredPoints = points.map((point, index) => {
+            let color = '#f87171'; // red
+            const handicapValue = parseFloat(point.handicap);
+            if (index > 0) {
+                const diff = point.home - points[index - 1].home;
+                if (handicapValue < 0) {
+                    if (diff < -0.02) color = '#facc15'; // yellow
+                    else if (Math.abs(diff) <= 0.02) color = '#4ade80'; // green
+                } else {
+                    if (diff > 0.02) color = '#facc15'; // yellow
+                    else if (Math.abs(diff) <= 0.02) color = '#4ade80'; // green
+                }
+            }
+            return { ...point, handicap: handicapValue, color };
+        });
+        finalData.push(...coloredPoints);
+    }
+    return finalData;
+  }, [homeOddsHistory]);
 
   const apiChartData = useMemo(() => {
       const sortedMinutes = Object.keys(statsHistory).map(Number).sort((a, b) => a - b);
       return sortedMinutes.map(minute => {
           const statsForMinute = statsHistory[minute];
-          return {
-              minute,
-              homeApi: calculateAPIScore(statsForMinute, 0),
-              awayApi: calculateAPIScore(statsForMinute, 1),
-          };
+          return { minute, homeApi: calculateAPIScore(statsForMinute, 0), awayApi: calculateAPIScore(statsForMinute, 1) };
       });
   }, [statsHistory]);
   
   const shotData = useMemo(() => {
     const currentMin = parseInt(liveMatch.timer?.tm?.toString() || liveMatch.time || "0");
-    if (currentMin === 0 || marketChartData.length === 0) return [];
+    const baseMarketData = marketChartData.length > 0 ? marketChartData : homeMarketChartData;
+    if (currentMin === 0 || baseMarketData.length === 0) return [];
 
     const allOnTarget = stats.on_target[0] + stats.on_target[1];
     const allOffTarget = stats.off_target[0] + stats.off_target[1];
     const data: any[] = [];
 
     const findHandicapForMinute = (minute: number) => {
-      let closest = marketChartData[0];
-      for (const point of marketChartData) {
-        if (Math.abs(point.minute - minute) <= Math.abs(closest.minute - minute)) {
-          closest = point;
-        }
+      let closest = baseMarketData[0];
+      for (const point of baseMarketData) {
+        if (Math.abs(point.minute - minute) <= Math.abs(closest.minute - minute)) closest = point;
       }
       return closest.handicap;
     };
@@ -274,28 +300,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
       for (let i = 0; i < count; i++) {
         const seedString = `${match.id}-shot-${type}-${i}`;
         let seed = 0;
-        for (let k = 0; k < seedString.length; k++) {
-          seed += seedString.charCodeAt(k) * (k + 1);
-        }
+        for (let k = 0; k < seedString.length; k++) seed += seedString.charCodeAt(k) * (k + 1);
         const random = mulberry32(seed);
         const randomMinute = Math.floor(random() * 90) + 1;
-
         if (randomMinute <= currentMin) {
-          data.push({
-            minute: randomMinute,
-            handicap: findHandicapForMinute(randomMinute),
-            z: 250, // Make shots bigger
-            type: type,
-            fill: type === 'On Target' ? '#4ade80' : '#facc15',
-          });
+          data.push({ minute: randomMinute, handicap: findHandicapForMinute(randomMinute), z: 250, type: type, fill: type === 'On Target' ? '#4ade80' : '#facc15' });
         }
       }
     };
-
     generatePoints(allOnTarget, 'On Target');
     generatePoints(allOffTarget, 'Off Target');
     return data;
-  }, [stats, liveMatch.time, liveMatch.timer, match.id, marketChartData]);
+  }, [stats, liveMatch.time, liveMatch.timer, match.id, marketChartData, homeMarketChartData]);
 
 
   return (
@@ -342,7 +358,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
             ${analysis.level === 'very-high' ? 'bg-red-50 border-red-200' : 
               analysis.level === 'high' ? 'bg-orange-50 border-orange-200' : 
               'bg-gray-50 border-gray-200'}`}>
-            
             <div className="flex items-center gap-3">
                 <div className={`p-3 rounded-xl ${analysis.level === 'very-high' ? 'bg-red-500 text-white' : 'bg-white text-gray-500'}`}>
                     <Siren className="w-6 h-6" />
@@ -362,70 +377,62 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
             </div>
         </div>
 
-        {/* Combined Chart */}
+        {/* Over/Under Chart */}
         {(marketChartData.length > 0 || apiChartData.length > 0) && (
           <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
               <h3 className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
                   <TrendingUp className="w-4 h-4 text-emerald-500" />
-                  Over/Under Market, Shots & API Timeline
+                  Over/Under Market (1_3), Shots & API Timeline
               </h3>
               <div className="h-80 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                       <ComposedChart margin={{ top: 10, right: 10, bottom: 0, left: -15 }}>
-                          <XAxis
-                              type="number"
-                              dataKey="minute"
-                              name="Minute"
-                              unit="'"
-                              domain={[0, 90]}
-                              ticks={[0, 15, 30, 45, 60, 75, 90]}
-                              tick={{ fontSize: 10, fill: '#9ca3af' }}
-                              tickLine={false}
-                              axisLine={{ stroke: '#e5e7eb' }}
-                          />
-                          <YAxis
-                              yAxisId="left"
-                              dataKey="handicap"
-                              name="HDP"
-                              width={45}
-                              domain={['dataMin - 0.25', 'dataMax + 0.25']}
-                              tick={{ fontSize: 10, fill: '#9ca3af' }}
-                              tickLine={false}
-                              axisLine={{ stroke: '#e5e7eb' }}
-                              allowDecimals={true}
-                              tickCount={8}
-                          />
-                          <YAxis
-                            yAxisId="right"
-                            orientation="right"
-                            tick={{ fontSize: 10, fill: '#9ca3af' }}
-                            tickLine={false}
-                            axisLine={{ stroke: '#e5e7eb' }}
-                            width={35}
-                            domain={['dataMin - 5', 'dataMax + 10']}
-                          />
+                          <XAxis type="number" dataKey="minute" name="Minute" unit="'" domain={[0, 90]} ticks={[0, 15, 30, 45, 60, 75, 90]} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
+                          <YAxis yAxisId="left" dataKey="handicap" name="HDP" width={45} domain={['dataMin - 0.25', 'dataMax + 0.25']} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} allowDecimals={true} tickCount={8} />
+                          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} width={35} domain={['dataMin - 5', 'dataMax + 10']} />
                           <ZAxis type="number" dataKey="z" range={[50, 200]} />
                           <Tooltip cursor={{ strokeDasharray: '3 3' }} content={<CustomTooltip />} />
                           <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}/>
-
                           <Scatter yAxisId="left" name="Market" data={marketChartData} fill="#8884d8">
-                              {marketChartData.map((entry, index) => (
-                                  <Cell key={`cell-market-${index}`} fill={getOddsColor(entry.over)} />
-                              ))}
+                              {marketChartData.map((entry, index) => ( <Cell key={`cell-market-${index}`} fill={entry.color} /> ))}
                           </Scatter>
-
                           <Scatter yAxisId="left" name="Shots" data={shotData} shape="circle">
-                              {shotData.map((entry, index) => (
-                                  <Cell key={`cell-shot-${index}`} fill={entry.fill} />
-                              ))}
+                              {shotData.map((entry, index) => ( <Cell key={`cell-shot-${index}`} fill={entry.fill} /> ))}
                           </Scatter>
-                          
                           <Line yAxisId="right" type="monotone" data={apiChartData} dataKey="homeApi" name="Home API" stroke="#2563eb" strokeWidth={2} dot={false} />
                           <Line yAxisId="right" type="monotone" data={apiChartData} dataKey="awayApi" name="Away API" stroke="#ea580c" strokeWidth={2} dot={false} />
                       </ComposedChart>
                   </ResponsiveContainer>
                   <OddsColorLegent />
                   <ShotLegend />
+              </div>
+          </div>
+        )}
+
+        {/* Home Odds Chart */}
+        {(homeMarketChartData.length > 0 || apiChartData.length > 0) && (
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+              <h3 className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-purple-500" />
+                  Home Odds (1_2) & API Timeline
+              </h3>
+              <div className="h-80 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart margin={{ top: 10, right: 10, bottom: 0, left: -15 }}>
+                          <XAxis type="number" dataKey="minute" name="Minute" unit="'" domain={[0, 90]} ticks={[0, 15, 30, 45, 60, 75, 90]} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
+                          <YAxis yAxisId="left" dataKey="handicap" name="HDP" width={45} domain={['dataMin - 0.25', 'dataMax + 0.25']} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} allowDecimals={true} tickCount={8} />
+                          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} width={35} domain={['dataMin - 5', 'dataMax + 10']} />
+                          <ZAxis type="number" dataKey="z" range={[50, 200]} />
+                          <Tooltip cursor={{ strokeDasharray: '3 3' }} content={<CustomTooltip />} />
+                          <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}/>
+                          <Scatter yAxisId="left" name="Market" data={homeMarketChartData} fill="#8884d8">
+                              {homeMarketChartData.map((entry, index) => ( <Cell key={`cell-hmarket-${index}`} fill={entry.color} /> ))}
+                          </Scatter>
+                          <Line yAxisId="right" type="monotone" data={apiChartData} dataKey="homeApi" name="Home API" stroke="#2563eb" strokeWidth={2} dot={false} />
+                          <Line yAxisId="right" type="monotone" data={apiChartData} dataKey="awayApi" name="Away API" stroke="#ea580c" strokeWidth={2} dot={false} />
+                      </ComposedChart>
+                  </ResponsiveContainer>
+                  <OddsColorLegent />
               </div>
           </div>
         )}

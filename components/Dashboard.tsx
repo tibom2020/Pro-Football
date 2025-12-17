@@ -47,8 +47,8 @@ const CustomTooltip = ({ active, payload }: any) => {
     return (
       <div className="bg-slate-800 text-white text-xs p-2 rounded shadow-lg border border-slate-700">
         <p className="font-bold">Minute: {data.minute}'</p>
-        <p>HDP: {data.handicap.toFixed(2)}</p>
-        <p className="text-gray-400">Over Odds: {data.over.toFixed(3)}</p>
+        <p>HDP: {typeof data.handicap === 'number' ? data.handicap.toFixed(2) : '-'}</p>
+        <p className="text-gray-400">Over Odds: {typeof data.over === 'number' ? data.over.toFixed(3) : '-'}</p>
       </div>
     );
   }
@@ -347,7 +347,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
             </div>
             <div className="text-right">
                 <div className="text-xs text-gray-500">Momentum</div>
-                <div className="font-bold text-indigo-600">{analysis.factors.apiMomentum.toFixed(1)}</div>
+                <div className="font-bold text-indigo-600">
+                  {typeof analysis.factors.apiMomentum === 'number' ? analysis.factors.apiMomentum.toFixed(1) : '-'}
+                </div>
             </div>
         </div>
 

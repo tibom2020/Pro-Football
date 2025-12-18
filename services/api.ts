@@ -1,7 +1,11 @@
+
 import { MatchInfo, OddsData } from '../types';
 
-// The previous proxy (corsproxy.io) is being blocked by the API (403 Forbidden).
-// Switching to another public proxy to resolve the issue.
+/**
+ * PROXY STRATEGY:
+ * B365 API often blocks common public proxies like allorigins or corsproxy.io.
+ * codetabs.com is a reliable alternative that frequently bypasses these filters.
+ */
 const PROXY_URL = "https://api.codetabs.com/v1/proxy?quest=";
 
 const B365_API_INPLAY = "https://api.b365api.com/v3/events/inplay";
@@ -57,6 +61,38 @@ const mockOdds: OddsData = {
     }
 };
 
+/**
+ * Performs a proxied fetch and handles common API/Proxy errors.
+ */
+const safeFetch = async (url: string) => {
+    const proxiedUrl = `${PROXY_URL}${encodeURIComponent(url)}`;
+    const response = await fetch(proxiedUrl);
+    
+    if (response.status === 403) {
+      throw new Error("Access Forbidden (403). B365 or the Proxy is blocking this request. Check your API Token or try again later.");
+    }
+    
+    if (response.status === 429) {
+      throw new Error("Too Many Requests (429). Proxy rate limit reached.");
+    }
+
+    if (!response.ok) {
+      throw new Error(`Connection Error: ${response.status} ${response.statusText}`);
+    }
+
+    const text = await response.text();
+    if (!text || text.trim().length === 0) {
+        throw new Error("The API returned an empty response.");
+    }
+
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        console.error("JSON Parse Error. Raw response:", text);
+        throw new Error("The API response was not valid JSON. Ensure your token is correct.");
+    }
+};
+
 export const getInPlayEvents = async (token: string): Promise<MatchInfo[]> => {
   if (token === 'DEMO_MODE') {
     return new Promise(resolve => setTimeout(() => resolve(mockMatches), 500));
@@ -65,27 +101,18 @@ export const getInPlayEvents = async (token: string): Promise<MatchInfo[]> => {
 
   try {
     const targetUrl = `${B365_API_INPLAY}?sport_id=1&token=${token}`;
-    const proxiedUrl = `${PROXY_URL}${encodeURIComponent(targetUrl)}`;
-    const response = await fetch(proxiedUrl);
+    const data = await safeFetch(targetUrl);
     
-    if (!response.ok) {
-      throw new Error(`Lỗi API: ${response.status}`);
-    }
-
-    const text = await response.text();
-    if (!text) return [];
-
-    const data = JSON.parse(text);
     if (data.success !== 1 && data.success !== "1") {
-        throw new Error(data.error || 'API trả về lỗi nhưng không có thông báo cụ thể.');
+        throw new Error(data.error || 'The API returned a failure status.');
     }
+    
     const results = data.results || [];
-    // Filter out Esoccer matches
     return results.filter((event: MatchInfo) => 
         event.league && event.league.name && !event.league.name.toLowerCase().includes('esoccer')
     );
   } catch (error) {
-    console.error("Không thể tải danh sách trận đấu:", error);
+    console.error("Failed to load match list:", error);
     throw error;
   }
 };
@@ -97,27 +124,18 @@ export const getMatchDetails = async (token: string, eventId: string): Promise<M
   if (!token || !eventId) return null;
   try {
     const targetUrl = `${B365_API_INPLAY}?sport_id=1&token=${token}`;
-    const proxiedUrl = `${PROXY_URL}${encodeURIComponent(targetUrl)}`;
-    const response = await fetch(proxiedUrl);
-    if (!response.ok) {
-        console.error(`Error fetching details for event ${eventId}: Status ${response.status}`);
-        return null;
-    }
-    const text = await response.text();
-    if (!text) return null;
+    const data = await safeFetch(targetUrl);
     
-    const data = JSON.parse(text);
     const results: MatchInfo[] = data.results || [];
     const match = results.find(e => e.id === eventId);
     
-    // Also filter here to prevent direct access to an Esoccer match
     if (match && match.league && match.league.name && match.league.name.toLowerCase().includes('esoccer')) {
       return null;
     }
     
     return match || null;
   } catch (error) {
-    console.error(`Failed to fetch or parse match details for event ${eventId}`, error);
+    console.error(`Failed to fetch match details for event ${eventId}:`, error);
     return null;
   }
 };
@@ -129,21 +147,15 @@ export const getMatchOdds = async (token: string, eventId: string): Promise<Odds
   if (!token || !eventId) return null;
   try {
     const targetUrl = `${B365_API_ODDS}?token=${token}&event_id=${eventId}`;
-    const proxiedUrl = `${PROXY_URL}${encodeURIComponent(targetUrl)}`;
-    const response = await fetch(proxiedUrl);
-     if (!response.ok) {
-        console.error(`Error fetching odds for event ${eventId}: Status ${response.status}`);
+    const data = await safeFetch(targetUrl);
+    
+    if (!data || data.success === 0 || data.success === "0") {
+        console.warn(`API reported failure fetching odds for event ${eventId}:`, data?.error || 'Unknown error');
         return null;
     }
-    const text = await response.text();
-    if (!text) {
-        console.warn(`Empty odds response for event ${eventId}`);
-        return null;
-    }
-    const data = JSON.parse(text);
     return data || null;
   } catch (error) {
-    console.error(`Failed to fetch or parse odds for event ${eventId}`, error);
+    console.error(`Failed to fetch odds for event ${eventId}:`, error);
     return null;
   }
 };

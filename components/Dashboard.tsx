@@ -296,6 +296,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
     return finalData;
   }, [homeOddsHistory]);
 
+  const yAxisDomainAndTicks = useMemo(() => {
+    const allHandicaps = [
+      ...marketChartData.map(d => d.handicap),
+      ...homeMarketChartData.map(d => d.handicap)
+    ].filter(h => typeof h === 'number' && !isNaN(h));
+
+    if (allHandicaps.length === 0) {
+      const defaultTicks = [-1.0, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1.0];
+      return {
+          domain: [defaultTicks[0], defaultTicks[defaultTicks.length - 1]],
+          ticks: defaultTicks
+      };
+    }
+
+    const dataMin = Math.min(...allHandicaps);
+    const dataMax = Math.max(...allHandicaps);
+
+    const domainMin = Math.floor((dataMin - 0.25) / 0.25) * 0.25;
+    const domainMax = Math.ceil((dataMax + 0.25) / 0.25) * 0.25;
+    
+    const ticks = [];
+    for (let i = domainMin; i <= domainMax + 0.001; i += 0.25) {
+      ticks.push(Number(i.toFixed(2)));
+    }
+    
+    if (ticks.length < 2) {
+        ticks.unshift(Number((domainMin - 0.25).toFixed(2)));
+        ticks.push(Number((domainMax + 0.25).toFixed(2)));
+    }
+
+    return {
+      domain: [domainMin, domainMax],
+      ticks: ticks,
+    };
+  }, [marketChartData, homeMarketChartData]);
+
   const apiChartData = useMemo(() => {
       const sortedMinutes = Object.keys(statsHistory).map(Number).sort((a, b) => a - b);
       return sortedMinutes.map(minute => {
@@ -413,7 +449,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
                   <ResponsiveContainer width="100%" height="100%">
                       <ComposedChart margin={{ top: 10, right: 10, bottom: 0, left: -15 }}>
                           <XAxis type="number" dataKey="minute" name="Minute" unit="'" domain={[0, 90]} ticks={[0, 15, 30, 45, 60, 75, 90]} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
-                          <YAxis yAxisId="left" dataKey="handicap" name="HDP" width={45} domain={['dataMin - 0.25', 'dataMax + 0.25']} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} allowDecimals={true} tickCount={8} />
+                          <YAxis yAxisId="left" dataKey="handicap" name="HDP" width={45} domain={yAxisDomainAndTicks.domain} ticks={yAxisDomainAndTicks.ticks} interval={0} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} allowDecimals={true} />
                           <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} width={35} domain={['dataMin - 5', 'dataMax + 10']} />
                           <ZAxis type="number" dataKey="z" range={[50, 200]} />
                           <Tooltip cursor={{ strokeDasharray: '3 3' }} content={<CustomTooltip />} />
@@ -445,7 +481,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
                   <ResponsiveContainer width="100%" height="100%">
                       <ComposedChart margin={{ top: 10, right: 10, bottom: 0, left: -15 }}>
                           <XAxis type="number" dataKey="minute" name="Minute" unit="'" domain={[0, 90]} ticks={[0, 15, 30, 45, 60, 75, 90]} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
-                          <YAxis yAxisId="left" dataKey="handicap" name="HDP" width={45} domain={['dataMin - 0.25', 'dataMax + 0.25']} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} allowDecimals={true} tickCount={8} />
+                          <YAxis yAxisId="left" dataKey="handicap" name="HDP" width={45} domain={yAxisDomainAndTicks.domain} ticks={yAxisDomainAndTicks.ticks} interval={0} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} allowDecimals={true} />
                           <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} width={35} domain={['dataMin - 5', 'dataMax + 10']} />
                           <ZAxis type="number" dataKey="z" range={[50, 200]} />
                           <Tooltip cursor={{ strokeDasharray: '3 3' }} content={<CustomTooltip />} />

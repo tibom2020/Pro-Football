@@ -203,19 +203,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
     setTimeout(() => setIsRefreshing(false), 500);
   };
 
-
   const analysis: PreGoalAnalysis = useMemo(() => {
     const time = parseInt(liveMatch.timer?.tm?.toString() || liveMatch.time || "0");
     const totalDA = stats.dangerous_attacks[0] + stats.dangerous_attacks[1];
     const totalOT = stats.on_target[0] + stats.on_target[1];
-    const attackDensity = (totalDA * 0.5 + totalOT * 2) / Math.max(1, time); 
-    const probabilityScore = Math.min(95, Math.max(5, Math.round(attackDensity * 100)));
+    const totalOffT = stats.off_target[0] + stats.off_target[1];
+
+    // New Formula: Weighted momentum adjusted by market odds
+    const rawMomentum = (totalOT * 2.5) + (totalOffT * 0.5) + (totalDA * 0.4);
+    const momentumPerMinute = rawMomentum / Math.max(1, time);
+    
+    // Get latest over odds to use as a market context factor
+    const latestOdds = oddsHistory.length > 0 ? oddsHistory[oddsHistory.length - 1] : null;
+    const currentOverOdds = latestOdds ? latestOdds.over : 2.0; // Default to 2.0 if no history
+    
+    // Lower odds = higher expectation = higher factor. Clamp to prevent extremes.
+    const oddsFactor = Math.max(0.7, Math.min(1.5, 2.0 / currentOverOdds));
+    
+    const combinedScore = momentumPerMinute * oddsFactor;
+    
+    // Scale the combined score to a 0-100 range, clamping at 5 and 95.
+    // The scaling factor (e.g., 30) is an empirical value to map the score to a sensible percentage.
+    const probabilityScore = Math.min(95, Math.max(5, Math.round(combinedScore * 30)));
+
     let level: PreGoalAnalysis['level'] = 'low';
     if (probabilityScore > 80) level = 'very-high';
     else if (probabilityScore > 60) level = 'high';
     else if (probabilityScore > 40) level = 'medium';
-    return { score: probabilityScore, level, factors: { apiMomentum: attackDensity, shotCluster: totalOT, pressure: totalDA } };
-  }, [stats, liveMatch.time, liveMatch.timer]);
+    
+    return { 
+      score: probabilityScore, 
+      level, 
+      factors: { 
+        apiMomentum: momentumPerMinute, // Keep the raw momentum for display
+        shotCluster: totalOT, 
+        pressure: totalDA 
+      } 
+    };
+  }, [stats, liveMatch.time, liveMatch.timer, oddsHistory]);
   
   const scoreParts = (liveMatch.ss || "0-0").split("-");
 

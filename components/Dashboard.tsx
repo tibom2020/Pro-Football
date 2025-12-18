@@ -1,5 +1,6 @@
 
 
+
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { MatchInfo, PreGoalAnalysis, OddsItem, ProcessedStats } from '../types';
 import { parseStats, getMatchDetails, getMatchOdds } from '../services/api';
@@ -267,6 +268,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
     };
     
     const getBubbleIntensity = (chartData: any[], minute: number, range: number) => {
+        const minT = Math.max(0, minute - range);
         return chartData.filter(b => b.minute >= minT && b.minute <= minute && (b.colorName==='green' || b.colorName==='yellow' || b.highlight))
                         .reduce((acc, b) => acc + (b.highlight ? 1.6 : 1.0), 0);
     };
@@ -385,7 +387,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
       setShotEvents(newShots);
   }, [statsHistory]);
 
-  // FIX: An unclosed comment was causing parsing errors. Also, implemented a simple refresh logic.
   const handleRefresh = async () => {
     setIsRefreshing(true);
     const details = await getMatchDetails(token, liveMatch.id);
@@ -396,11 +397,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
   };
   const analysis: PreGoalAnalysis = useMemo(() => { return {score:0, level:'low', factors:{apiMomentum:0, shotCluster:0, pressure:0}}}, []);
   const scoreParts = (liveMatch.ss || "0-0").split("-");
-
-  const yAxisDomainAndTicks = useMemo(() => {
-      const defaultTicks = [-1.0, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1.0];
-      return { domain: [-1,1], ticks: defaultTicks };
-  }, [marketChartData, homeMarketChartData]);
   
   const apiChartData = useMemo(() => {
       const sortedMinutes = Object.keys(statsHistory).map(Number).sort((a, b) => a - b);
@@ -464,7 +460,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
                   <ResponsiveContainer width="100%" height="100%">
                       <ComposedChart margin={{ top: 10, right: 10, bottom: 0, left: -15 }}>
                           <XAxis type="number" dataKey="minute" name="Minute" unit="'" domain={[0, 90]} ticks={[0, 15, 30, 45, 60, 75, 90]} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
-                          <YAxis yAxisId="left" dataKey="handicap" name="HDP" width={45} domain={yAxisDomainAndTicks.domain} ticks={yAxisDomainAndTicks.ticks} interval={0} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} allowDecimals={true} />
+                          <YAxis yAxisId="left" dataKey="handicap" name="HDP" width={45} domain={['dataMin - 0.25', 'dataMax + 0.25']} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} allowDecimals={true} tickCount={8} />
                           <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} width={35} domain={['dataMin - 5', 'dataMax + 10']} />
                           <Tooltip cursor={{ strokeDasharray: '3 3' }} content={<CustomTooltip />} />
                           <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}/>
@@ -489,7 +485,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
                   <ResponsiveContainer width="100%" height="100%">
                       <ComposedChart margin={{ top: 10, right: 10, bottom: 0, left: -15 }}>
                           <XAxis type="number" dataKey="minute" name="Minute" unit="'" domain={[0, 90]} ticks={[0, 15, 30, 45, 60, 75, 90]} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
-                          <YAxis yAxisId="left" dataKey="handicap" name="HDP" width={45} domain={yAxisDomainAndTicks.domain} ticks={yAxisDomainAndTicks.ticks} interval={0} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} allowDecimals={true} />
+                          <YAxis yAxisId="left" dataKey="handicap" name="HDP" width={45} domain={['dataMin - 0.25', 'dataMax + 0.25']} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} allowDecimals={true} tickCount={8} />
                           <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} width={35} domain={['dataMin - 5', 'dataMax + 10']} />
                           <Tooltip cursor={{ strokeDasharray: '3 3' }} content={<CustomTooltip />} />
                           <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}/>

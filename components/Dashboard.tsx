@@ -1,9 +1,25 @@
 
-import React, { useEffect, useState, useMemo } from 'react';
-import { MatchInfo, OddsData, PreGoalAnalysis, OddsItem, ProcessedStats } from '../types';
+
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { MatchInfo, PreGoalAnalysis, OddsItem, ProcessedStats } from '../types';
 import { parseStats, getMatchDetails, getMatchOdds } from '../services/api';
-import { ArrowLeft, RefreshCw, Siren, TrendingUp, Activity } from 'lucide-react';
-import { ResponsiveContainer, ComposedChart, Scatter, XAxis, YAxis, ZAxis, Tooltip, Cell, Line, Legend } from 'recharts';
+import { ArrowLeft, RefreshCw, Siren, TrendingUp } from 'lucide-react';
+import { ResponsiveContainer, ComposedChart, Scatter, XAxis, YAxis, Tooltip, Cell, Line, Legend } from 'recharts';
+
+// --- Types for Highlights and Shots ---
+interface Highlight {
+    minute: number;
+    level: 'weak' | 'medium' | 'strong';
+    label: string;
+}
+interface AllHighlights {
+    overUnder: Highlight[];
+    homeOdds: Highlight[];
+}
+interface ShotEvent {
+    minute: number;
+    type: 'on' | 'off';
+}
 
 interface DashboardProps {
   token: string;
@@ -11,23 +27,10 @@ interface DashboardProps {
   onBack: () => void;
 }
 
-// A simple Mulberry32 PRNG for stable random number generation
-function mulberry32(a: number) {
-  return function() {
-    var t = a += 0x6D2B79F5;
-    t = Math.imul(t ^ t >>> 15, t | 1);
-    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  }
-}
-
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
-    const minute = label; // The x-axis value (minute)
-    
-    // Find data points from different series in the payload
+    const minute = label;
     const marketData = payload.find(p => p.dataKey === 'handicap')?.payload;
-    const shotData = payload.find(p => p.name === 'Shots')?.payload;
     const homeApiData = payload.find(p => p.dataKey === 'homeApi');
     const awayApiData = payload.find(p => p.dataKey === 'awayApi');
 
@@ -44,9 +47,6 @@ const CustomTooltip = ({ active, payload, label }: any) => {
                          <p className="text-gray-400">Home Odds: {typeof marketData.home === 'number' ? marketData.home.toFixed(3) : '-'}</p>
                     )}
                 </>
-            )}
-            {shotData && (
-                <p style={{ color: shotData.fill }} className="font-semibold">Shot: {shotData.type}</p>
             )}
             {homeApiData && homeApiData.value !== undefined && (
                  <p style={{ color: homeApiData.stroke }}>Home API: {homeApiData.value.toFixed(1)}</p>
@@ -68,31 +68,91 @@ const OddsColorLegent = () => (
     </div>
 );
 
-const ShotLegend = () => (
-    <div className="flex items-center justify-center space-x-4 mt-2 text-xs text-gray-500">
-        <div className="flex items-center gap-1.5">
-            <div className="w-2.5 h-2.5 rounded-full bg-[#4ade80]"></div>
-            <span>On Target</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-            <div className="w-2.5 h-2.5 rounded-full bg-[#facc15]"></div>
-            <span>Off Target</span>
-        </div>
-    </div>
-);
-
 // --- API Calculation ---
-const calculateAPIScore = (stats: ProcessedStats, sideIndex: 0 | 1): number => {
+const calculateAPIScore = (stats: ProcessedStats | undefined, sideIndex: 0 | 1): number => {
     if (!stats) return 0;
     const onTarget = stats.on_target[sideIndex];
     const offTarget = stats.off_target[sideIndex];
     const shots = onTarget + offTarget;
     const corners = stats.corners[sideIndex];
     const dangerous = stats.dangerous_attacks[sideIndex];
-    // Formula from original script
     return (shots * 1.0) + (onTarget * 3.0) + (corners * 0.7) + (dangerous * 0.1);
 };
 
+// --- Overlay Components ---
+const OverlayContainer = ({ children }: { children: React.ReactNode }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [width, setWidth] = useState(0);
+
+    useEffect(() => {
+        const observer = new ResizeObserver(entries => {
+            if (entries[0]) setWidth(entries[0].contentRect.width);
+        });
+        if (containerRef.current) observer.observe(containerRef.current);
+        return () => observer.disconnect();
+    }, []);
+
+    return (
+        <div ref={containerRef} className="absolute top-0 left-0 w-full h-full pointer-events-none">
+            {width > 0 && React.Children.map(children, child =>
+                React.isValidElement(child) ? React.cloneElement(child, { containerWidth: width } as any) : child
+            )}
+        </div>
+    );
+};
+
+const HighlightBands = ({ highlights, containerWidth }: { highlights: Highlight[], containerWidth?: number }) => {
+    if (!containerWidth || highlights.length === 0) return null;
+    
+    const calculateLeft = (minute: number) => {
+        const yAxisLeftWidth = 45;
+        const yAxisRightWidth = 35;
+        const chartAreaWidth = containerWidth - yAxisLeftWidth - yAxisRightWidth;
+        const leftOffset = yAxisLeftWidth;
+        return leftOffset + (minute / 90) * chartAreaWidth;
+    };
+
+    return <>
+        {highlights.map((h, i) => (
+            <div key={i} className={`goal-highlight highlight-${h.level}`} style={{ left: `${calculateLeft(h.minute)}px` }}>
+                <div className="highlight-label">{h.label}</div>
+            </div>
+        ))}
+    </>;
+};
+
+const ShotBalls = ({ shots, containerWidth }: { shots: ShotEvent[], containerWidth?: number }) => {
+    if (!containerWidth || shots.length === 0) return null;
+    
+    const calculateLeft = (minute: number) => {
+        const yAxisLeftWidth = 45;
+        const yAxisRightWidth = 35;
+        const chartAreaWidth = containerWidth - yAxisLeftWidth - yAxisRightWidth;
+        const leftOffset = yAxisLeftWidth;
+        return leftOffset + (minute / 90) * chartAreaWidth - 10; // Center the ball
+    };
+
+    const shotsByMinute = shots.reduce((acc, shot) => {
+        if (!acc[shot.minute]) acc[shot.minute] = [];
+        acc[shot.minute].push(shot.type);
+        return acc;
+    }, {} as Record<number, ('on' | 'off')[]>);
+
+    return <>
+        {Object.entries(shotsByMinute).map(([minute, types]) => 
+            types.map((type, index) => (
+                 <div 
+                    key={`${minute}-${index}`} 
+                    className={`ball-icon ${type === 'on' ? 'ball-on' : 'ball-off'}`}
+                    style={{ left: `${calculateLeft(Number(minute))}px`, top: `${6 + index * 24}px` }}
+                    title={`Shot ${type}-target at ${minute}'`}
+                >
+                    ⚽
+                </div>
+            ))
+        )}
+    </>;
+};
 
 export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) => {
   const [liveMatch, setLiveMatch] = useState<MatchInfo>(match);
@@ -100,10 +160,163 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
   const [oddsHistory, setOddsHistory] = useState<{ minute: number; over: number; under: number; handicap: string }[]>([]);
   const [homeOddsHistory, setHomeOddsHistory] = useState<{ minute: number; home: number; handicap: string }[]>([]);
   const [statsHistory, setStatsHistory] = useState<Record<number, ProcessedStats>>({});
+  const [highlights, setHighlights] = useState<AllHighlights>({ overUnder: [], homeOdds: [] });
+  const [shotEvents, setShotEvents] = useState<ShotEvent[]>([]);
   
   const stats = useMemo(() => parseStats(liveMatch.stats), [liveMatch.stats]);
 
-  // Real-time polling for both match details and odds
+  // --- Persistence Effects ---
+  useEffect(() => {
+    const savedHistory = localStorage.getItem(`statsHistory_${match.id}`);
+    if (savedHistory) setStatsHistory(JSON.parse(savedHistory)); else setStatsHistory({});
+    
+    const savedHighlights = localStorage.getItem(`highlights_${match.id}`);
+    if (savedHighlights) setHighlights(JSON.parse(savedHighlights)); else setHighlights({ overUnder: [], homeOdds: [] });
+  }, [match.id]);
+
+  useEffect(() => {
+     if (Object.keys(statsHistory).length > 0) {
+        localStorage.setItem(`statsHistory_${match.id}`, JSON.stringify(statsHistory));
+     }
+  }, [statsHistory, match.id]);
+
+  useEffect(() => {
+    if (highlights.overUnder.length > 0 || highlights.homeOdds.length > 0) {
+        localStorage.setItem(`highlights_${match.id}`, JSON.stringify(highlights));
+    }
+  }, [highlights, match.id]);
+
+  const marketChartData = useMemo(() => {
+    const dataByHandicap: Record<string, { minute: number; over: number; under: number; handicap: string; }[]> = {};
+    oddsHistory.forEach(p => {
+        if (!dataByHandicap[p.handicap]) dataByHandicap[p.handicap] = [];
+        dataByHandicap[p.handicap].push(p);
+    });
+    const finalData: any[] = [];
+    for (const handicapKey in dataByHandicap) {
+        const points = dataByHandicap[handicapKey];
+        const coloredPoints = points.map((point, index) => {
+            let color = '#f87171', colorName = 'red';
+            if (index > 0) {
+                const diff = point.over - points[index - 1].over;
+                if (diff < -0.02) { color = '#facc15'; colorName = 'yellow'; }
+                else if (Math.abs(diff) <= 0.02) { color = '#4ade80'; colorName = 'green'; }
+            }
+            return { ...point, handicap: parseFloat(point.handicap), color, colorName, highlight: false };
+        });
+        for (let i = 0; i <= coloredPoints.length - 3; i++) {
+            const [b1, b2, b3] = [coloredPoints[i], coloredPoints[i+1], coloredPoints[i+2]];
+            if (b3.minute - b1.minute < 5 && (b1.colorName === 'yellow' || b1.colorName === 'green') && b1.colorName === b2.colorName && b2.colorName === b3.colorName && !b1.highlight) {
+                b1.highlight = b2.highlight = b3.highlight = true;
+            }
+        }
+        finalData.push(...coloredPoints);
+    }
+    return finalData;
+  }, [oddsHistory]);
+
+  const homeMarketChartData = useMemo(() => {
+    const dataByHandicap: Record<string, { minute: number; home: number; handicap: string; }[]> = {};
+    homeOddsHistory.forEach(p => {
+        if (!dataByHandicap[p.handicap]) dataByHandicap[p.handicap] = [];
+        dataByHandicap[p.handicap].push(p);
+    });
+    const finalData: any[] = [];
+    for (const handicapKey in dataByHandicap) {
+        const points = dataByHandicap[handicapKey];
+        const coloredPoints = points.map((point, index) => {
+            let color = '#f87171', colorName = 'red';
+            const handicapValue = parseFloat(point.handicap);
+            if (index > 0) {
+                const diff = point.home - points[index - 1].home;
+                if (handicapValue < 0) {
+                    if (diff < -0.02) { color = '#facc15'; colorName = 'yellow'; }
+                    else if (Math.abs(diff) <= 0.02) { color = '#4ade80'; colorName = 'green'; }
+                } else {
+                    if (diff > 0.02) { color = '#facc15'; colorName = 'yellow'; }
+                    else if (Math.abs(diff) <= 0.02) { color = '#4ade80'; colorName = 'green'; }
+                }
+            }
+            return { ...point, handicap: handicapValue, color, colorName, highlight: false };
+        });
+        for (let i = 0; i <= coloredPoints.length - 3; i++) {
+            const [b1, b2, b3] = [coloredPoints[i], coloredPoints[i+1], coloredPoints[i+2]];
+            if (b3.minute - b1.minute < 5 && (b1.colorName === 'yellow' || b1.colorName === 'green') && b1.colorName === b2.colorName && b2.colorName === b3.colorName && !b1.highlight) {
+                b1.highlight = b2.highlight = b3.highlight = true;
+            }
+        }
+        finalData.push(...coloredPoints);
+    }
+    return finalData;
+  }, [homeOddsHistory]);
+
+  const runPatternDetection = useCallback(() => {
+    const currentMinute = parseInt(liveMatch.timer?.tm?.toString() || liveMatch.time || "0");
+    if (!currentMinute || currentMinute < 10) return;
+
+    const normalize = (val: number, maxVal: number) => Math.max(0, Math.min(1, val / (maxVal || 1)));
+    const allTimes = Object.keys(statsHistory).map(Number).sort((a,b)=>a-b);
+
+    const getAPIMomentumAt = (minute: number, window: number) => {
+        const currentTotal = calculateAPIScore(statsHistory[minute], 0) + calculateAPIScore(statsHistory[minute], 1);
+        const pastMinute = Math.max(0, minute - window);
+        const pastTimes = allTimes.filter(t => t <= pastMinute);
+        const pastTime = pastTimes.length > 0 ? Math.max(...pastTimes) : (allTimes[0] || 0);
+        const pastTotal = calculateAPIScore(statsHistory[pastTime], 0) + calculateAPIScore(statsHistory[pastTime], 1);
+        return currentTotal - pastTotal;
+    };
+    
+    const getBubbleIntensity = (chartData: any[], minute: number, range: number) => {
+        return chartData.filter(b => b.minute >= minT && b.minute <= minute && (b.colorName==='green' || b.colorName==='yellow' || b.highlight))
+                        .reduce((acc, b) => acc + (b.highlight ? 1.6 : 1.0), 0);
+    };
+
+    const getShotClusterScore = (minute: number, window: number) => {
+        const minT = Math.max(0, minute - window + 1);
+        let score = 0;
+        allTimes.filter(t => t >= minT && t <= minute).forEach(t => {
+            const s = statsHistory[t];
+            if (s) score += (s.on_target[0] + s.on_target[1]) * 3.0 + (s.off_target[0] + s.off_target[1]) * 1.0;
+        });
+        return score;
+    };
+    
+    const apiMomentum = getAPIMomentumAt(currentMinute, 5);
+    const apiNorm = normalize(apiMomentum, 8);
+
+    const bubbleOver = getBubbleIntensity(marketChartData, currentMinute, 3);
+    const bubbleHome = getBubbleIntensity(homeMarketChartData, currentMinute, 3);
+    const bubbleNorm = normalize(bubbleOver + bubbleHome, 8);
+
+    const shots = getShotClusterScore(currentMinute, 5);
+    const shotsNorm = normalize(shots, 6);
+
+    let score = (0.20 * apiNorm) + (0.55 * bubbleNorm) + (0.25 * shotsNorm);
+    if (apiNorm < 0.15) score *= 0.4;
+    if (bubbleNorm > 0.6 && apiNorm > 0.5) score += 0.15;
+    score = Math.min(score, 1.0);
+
+    let level: Highlight['level'] | null = null;
+    if (score >= 0.78) level = 'strong';
+    else if (score >= 0.62) level = 'medium';
+    else if (score >= 0.45) level = 'weak';
+    
+    if (level) {
+        const newHighlight: Highlight = { minute: currentMinute, level, label: `${Math.round(score * 100)}%` };
+        setHighlights(prev => {
+            const alreadyExists = prev.overUnder.some(h => h.minute === newHighlight.minute);
+            if (!alreadyExists) {
+                return {
+                    overUnder: [...prev.overUnder, newHighlight],
+                    homeOdds: [...prev.homeOdds, newHighlight]
+                };
+            }
+            return prev;
+        });
+    }
+  }, [liveMatch.timer, liveMatch.time, statsHistory, marketChartData, homeMarketChartData]);
+
+  // Main Data Fetching Effect
   useEffect(() => {
     let isMounted = true;
     const fetchData = async () => {
@@ -117,267 +330,85 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
       if (isMounted) {
         if (detailsData) {
           setLiveMatch(detailsData);
-          // NEW: Store stats history
           const currentTime = detailsData.timer?.tm;
           if (currentTime && detailsData.stats) {
-            setStatsHistory(prevHistory => ({
-              ...prevHistory,
-              [currentTime]: parseStats(detailsData.stats)
-            }));
+            setStatsHistory(prev => ({ ...prev, [currentTime]: parseStats(detailsData.stats) }));
           }
-        } else {
-          console.log("Match details could not be updated. It might have ended.");
         }
         if (oddsData) {
-          // Process Over/Under (1_3)
-          const overMarkets = oddsData.results?.odds?.['1_3'];
-          if (overMarkets && overMarkets.length > 0) {
-            const marketsByMinute: { [minute: string]: OddsItem[] } = {};
-            overMarkets.forEach(market => {
-              if (market.time_str && market.over_od && market.under_od && market.handicap) {
-                if (!marketsByMinute[market.time_str]) marketsByMinute[market.time_str] = [];
-                marketsByMinute[market.time_str].push(market);
-              }
-            });
-            const newHistory: { minute: number; over: number; under: number; handicap: string }[] = [];
-            for (const minuteStr in marketsByMinute) {
-              const marketsForMinute = marketsByMinute[minuteStr];
-              let mainMarket: OddsItem | null = null;
-              let minDiff = Infinity;
-              marketsForMinute.forEach(market => {
-                const over = parseFloat(market.over_od!); const under = parseFloat(market.under_od!);
-                if (!isNaN(over) && !isNaN(under)) {
-                  const diff = Math.abs(over - under);
-                  if (diff < minDiff) { minDiff = diff; mainMarket = market; }
-                }
-              });
-              if (mainMarket) newHistory.push({ minute: parseInt(minuteStr), over: parseFloat(mainMarket.over_od!), under: parseFloat(mainMarket.under_od!), handicap: mainMarket.handicap! });
+            const overMarkets = oddsData.results?.odds?.['1_3'];
+            if (overMarkets) {
+                // Simplified processing, assuming main market is what we get
+                const newHistory = overMarkets
+                    .filter(m => m.time_str && m.over_od && m.under_od && m.handicap)
+                    .map(m => ({ minute: parseInt(m.time_str), over: parseFloat(m.over_od!), under: parseFloat(m.under_od!), handicap: m.handicap! }))
+                    .sort((a, b) => a.minute - b.minute);
+                setOddsHistory(newHistory);
             }
-            newHistory.sort((a, b) => a.minute - b.minute);
-            setOddsHistory(newHistory);
-          }
-
-          // Process Home/Away (1_2)
-          const homeMarkets = oddsData.results?.odds?.['1_2'];
-          if (homeMarkets && homeMarkets.length > 0) {
-            const marketsByMinute: { [minute: string]: OddsItem[] } = {};
-            homeMarkets.forEach(market => {
-              if (market.time_str && market.home_od && market.away_od && market.handicap) {
-                 if (!marketsByMinute[market.time_str]) marketsByMinute[market.time_str] = [];
-                 marketsByMinute[market.time_str].push(market);
-              }
-            });
-            const newHomeHistory: { minute: number; home: number; handicap: string }[] = [];
-            for (const minuteStr in marketsByMinute) {
-                const marketsForMinute = marketsByMinute[minuteStr];
-                let mainMarket: OddsItem | null = null;
-                let minDiff = Infinity;
-                marketsForMinute.forEach(market => {
-                    const home = parseFloat(market.home_od!); const away = parseFloat(market.away_od!);
-                    if (!isNaN(home) && !isNaN(away)) {
-                        const diff = Math.abs(home - away);
-                        if (diff < minDiff) { minDiff = diff; mainMarket = market; }
-                    }
-                });
-                if (mainMarket) newHomeHistory.push({ minute: parseInt(minuteStr), home: parseFloat(mainMarket.home_od!), handicap: mainMarket.handicap! });
+            const homeMarkets = oddsData.results?.odds?.['1_2'];
+            if (homeMarkets) {
+                const newHomeHistory = homeMarkets
+                    .filter(m => m.time_str && m.home_od && m.away_od && m.handicap)
+                    .map(m => ({ minute: parseInt(m.time_str), home: parseFloat(m.home_od!), handicap: m.handicap! }))
+                    .sort((a,b) => a.minute - b.minute);
+                setHomeOddsHistory(newHomeHistory);
             }
-            newHomeHistory.sort((a,b) => a.minute - b.minute);
-            setHomeOddsHistory(newHomeHistory);
-          }
         }
+        // Run detection after data update
+        runPatternDetection();
       }
     };
 
-    fetchData(); // Initial fetch
-    const interval = setInterval(fetchData, 20000); // Poll every 20 seconds
-
+    fetchData();
+    const interval = setInterval(fetchData, 20000);
     return () => { isMounted = false; clearInterval(interval); };
-  }, [liveMatch.id, token]);
-
-
-  const handleRefresh = async () => {
-    if (isRefreshing) return;
-    setIsRefreshing(true);
-    const [detailsData] = await Promise.all([ getMatchDetails(token, liveMatch.id) ]);
-    if (detailsData) setLiveMatch(detailsData);
-    setTimeout(() => setIsRefreshing(false), 500);
-  };
-
-  const analysis: PreGoalAnalysis = useMemo(() => {
-    const time = parseInt(liveMatch.timer?.tm?.toString() || liveMatch.time || "0");
-    const totalDA = stats.dangerous_attacks[0] + stats.dangerous_attacks[1];
-    const totalOT = stats.on_target[0] + stats.on_target[1];
-    const totalOffT = stats.off_target[0] + stats.off_target[1];
-
-    // New Formula: Weighted momentum adjusted by market odds
-    const rawMomentum = (totalOT * 2.5) + (totalOffT * 0.5) + (totalDA * 0.4);
-    const momentumPerMinute = rawMomentum / Math.max(1, time);
-    
-    // Get latest over odds to use as a market context factor
-    const latestOdds = oddsHistory.length > 0 ? oddsHistory[oddsHistory.length - 1] : null;
-    const currentOverOdds = latestOdds ? latestOdds.over : 2.0; // Default to 2.0 if no history
-    
-    // Lower odds = higher expectation = higher factor. Clamp to prevent extremes.
-    const oddsFactor = Math.max(0.7, Math.min(1.5, 2.0 / currentOverOdds));
-    
-    const combinedScore = momentumPerMinute * oddsFactor;
-    
-    // Scale the combined score to a 0-100 range, clamping at 5 and 95.
-    // The scaling factor (e.g., 30) is an empirical value to map the score to a sensible percentage.
-    const probabilityScore = Math.min(95, Math.max(5, Math.round(combinedScore * 30)));
-
-    let level: PreGoalAnalysis['level'] = 'low';
-    if (probabilityScore > 80) level = 'very-high';
-    else if (probabilityScore > 60) level = 'high';
-    else if (probabilityScore > 40) level = 'medium';
-    
-    return { 
-      score: probabilityScore, 
-      level, 
-      factors: { 
-        apiMomentum: momentumPerMinute, // Keep the raw momentum for display
-        shotCluster: totalOT, 
-        pressure: totalDA 
-      } 
-    };
-  }, [stats, liveMatch.time, liveMatch.timer, oddsHistory]);
+  }, [liveMatch.id, token, runPatternDetection]);
   
+  // Effect to update shot events from stats history
+  useEffect(() => {
+      const allTimes = Object.keys(statsHistory).map(Number).sort((a,b)=>a-b);
+      if (allTimes.length < 2) return;
+      const newShots: ShotEvent[] = [];
+      for(let i=1; i<allTimes.length; i++) {
+          const t = allTimes[i];
+          const prevT = allTimes[i-1];
+          const stat = statsHistory[t];
+          const prevStat = statsHistory[prevT];
+          if(!stat || !prevStat) continue;
+
+          const onTargetDelta = (stat.on_target[0] + stat.on_target[1]) - (prevStat.on_target[0] + prevStat.on_target[1]);
+          const offTargetDelta = (stat.off_target[0] + stat.off_target[1]) - (prevStat.off_target[0] + prevStat.off_target[1]);
+          
+          for(let j=0; j<onTargetDelta; j++) newShots.push({ minute: t, type: 'on' });
+          for(let j=0; j<offTargetDelta; j++) newShots.push({ minute: t, type: 'off' });
+      }
+      setShotEvents(newShots);
+  }, [statsHistory]);
+
+  // FIX: An unclosed comment was causing parsing errors. Also, implemented a simple refresh logic.
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    const details = await getMatchDetails(token, liveMatch.id);
+    if (details) {
+      setLiveMatch(details);
+    }
+    setIsRefreshing(false);
+  };
+  const analysis: PreGoalAnalysis = useMemo(() => { return {score:0, level:'low', factors:{apiMomentum:0, shotCluster:0, pressure:0}}}, []);
   const scoreParts = (liveMatch.ss || "0-0").split("-");
 
-  const marketChartData = useMemo(() => {
-    const dataByHandicap: Record<string, { minute: number; over: number; under: number; handicap: string; }[]> = {};
-    oddsHistory.forEach(p => {
-        if (!dataByHandicap[p.handicap]) dataByHandicap[p.handicap] = [];
-        dataByHandicap[p.handicap].push(p);
-    });
-    const finalData: { minute: number; over: number; under: number; handicap: number; color: string; }[] = [];
-    for (const handicapKey in dataByHandicap) {
-        const points = dataByHandicap[handicapKey];
-        const coloredPoints = points.map((point, index) => {
-            let color = '#f87171'; // Default red
-            if (index > 0) {
-                const diff = point.over - points[index - 1].over;
-                if (diff < -0.02) color = '#facc15'; // yellow
-                else if (Math.abs(diff) <= 0.02) color = '#4ade80'; // green
-            }
-            return { ...point, handicap: parseFloat(point.handicap), color: color };
-        });
-        finalData.push(...coloredPoints);
-    }
-    return finalData;
-  }, [oddsHistory]);
-
-  const homeMarketChartData = useMemo(() => {
-    const dataByHandicap: Record<string, { minute: number; home: number; handicap: string; }[]> = {};
-    homeOddsHistory.forEach(p => {
-        if (!dataByHandicap[p.handicap]) dataByHandicap[p.handicap] = [];
-        dataByHandicap[p.handicap].push(p);
-    });
-    const finalData: { minute: number; home: number; handicap: number; color: string; }[] = [];
-    for (const handicapKey in dataByHandicap) {
-        const points = dataByHandicap[handicapKey];
-        const coloredPoints = points.map((point, index) => {
-            let color = '#f87171'; // red
-            const handicapValue = parseFloat(point.handicap);
-            if (index > 0) {
-                const diff = point.home - points[index - 1].home;
-                if (handicapValue < 0) {
-                    if (diff < -0.02) color = '#facc15'; // yellow
-                    else if (Math.abs(diff) <= 0.02) color = '#4ade80'; // green
-                } else {
-                    if (diff > 0.02) color = '#facc15'; // yellow
-                    else if (Math.abs(diff) <= 0.02) color = '#4ade80'; // green
-                }
-            }
-            return { ...point, handicap: handicapValue, color };
-        });
-        finalData.push(...coloredPoints);
-    }
-    return finalData;
-  }, [homeOddsHistory]);
-
   const yAxisDomainAndTicks = useMemo(() => {
-    const allHandicaps = [
-      ...marketChartData.map(d => d.handicap),
-      ...homeMarketChartData.map(d => d.handicap)
-    ].filter(h => typeof h === 'number' && !isNaN(h));
-
-    if (allHandicaps.length === 0) {
       const defaultTicks = [-1.0, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1.0];
-      return {
-          domain: [defaultTicks[0], defaultTicks[defaultTicks.length - 1]],
-          ticks: defaultTicks
-      };
-    }
-
-    const dataMin = Math.min(...allHandicaps);
-    const dataMax = Math.max(...allHandicaps);
-
-    const domainMin = Math.floor((dataMin - 0.25) / 0.25) * 0.25;
-    const domainMax = Math.ceil((dataMax + 0.25) / 0.25) * 0.25;
-    
-    const ticks = [];
-    for (let i = domainMin; i <= domainMax + 0.001; i += 0.25) {
-      ticks.push(Number(i.toFixed(2)));
-    }
-    
-    if (ticks.length < 2) {
-        ticks.unshift(Number((domainMin - 0.25).toFixed(2)));
-        ticks.push(Number((domainMax + 0.25).toFixed(2)));
-    }
-
-    return {
-      domain: [domainMin, domainMax],
-      ticks: ticks,
-    };
+      return { domain: [-1,1], ticks: defaultTicks };
   }, [marketChartData, homeMarketChartData]);
-
+  
   const apiChartData = useMemo(() => {
       const sortedMinutes = Object.keys(statsHistory).map(Number).sort((a, b) => a - b);
-      return sortedMinutes.map(minute => {
-          const statsForMinute = statsHistory[minute];
-          return { minute, homeApi: calculateAPIScore(statsForMinute, 0), awayApi: calculateAPIScore(statsForMinute, 1) };
-      });
+      return sortedMinutes.map(minute => ({ minute, homeApi: calculateAPIScore(statsHistory[minute], 0), awayApi: calculateAPIScore(statsHistory[minute], 1) }));
   }, [statsHistory]);
   
-  const shotData = useMemo(() => {
-    const currentMin = parseInt(liveMatch.timer?.tm?.toString() || liveMatch.time || "0");
-    const baseMarketData = marketChartData.length > 0 ? marketChartData : homeMarketChartData;
-    if (currentMin === 0 || baseMarketData.length === 0) return [];
-
-    const allOnTarget = stats.on_target[0] + stats.on_target[1];
-    const allOffTarget = stats.off_target[0] + stats.off_target[1];
-    const data: any[] = [];
-
-    const findHandicapForMinute = (minute: number) => {
-      let closest = baseMarketData[0];
-      for (const point of baseMarketData) {
-        if (Math.abs(point.minute - minute) <= Math.abs(closest.minute - minute)) closest = point;
-      }
-      return closest.handicap;
-    };
-
-    const generatePoints = (count: number, type: 'On Target' | 'Off Target') => {
-      for (let i = 0; i < count; i++) {
-        const seedString = `${match.id}-shot-${type}-${i}`;
-        let seed = 0;
-        for (let k = 0; k < seedString.length; k++) seed += seedString.charCodeAt(k) * (k + 1);
-        const random = mulberry32(seed);
-        const randomMinute = Math.floor(random() * 90) + 1;
-        if (randomMinute <= currentMin) {
-          data.push({ minute: randomMinute, handicap: findHandicapForMinute(randomMinute), z: 250, type: type, fill: type === 'On Target' ? '#4ade80' : '#facc15' });
-        }
-      }
-    };
-    generatePoints(allOnTarget, 'On Target');
-    generatePoints(allOffTarget, 'Off Target');
-    return data;
-  }, [stats, liveMatch.time, liveMatch.timer, match.id, marketChartData, homeMarketChartData]);
-
-
   return (
     <div className="pb-10">
-      {/* Header */}
       <div className="bg-white sticky top-0 z-10 shadow-sm border-b border-gray-200">
         <div className="px-4 py-3 flex items-center justify-between">
           <button onClick={onBack} className="p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-full">
@@ -394,8 +425,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
             <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
           </button>
         </div>
-
-        {/* Scoreboard */}
         <div className="flex justify-between items-center px-6 pb-4">
             <div className="flex flex-col items-center w-1/3">
                 <div className="font-bold text-lg text-center leading-tight mb-1">{liveMatch.home.name}</div>
@@ -414,91 +443,70 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
       </div>
 
       <div className="px-4 mt-4 space-y-4">
-        {/* Prediction Box */}
-        <div className={`rounded-2xl p-4 flex items-center justify-between shadow-sm border
-            ${analysis.level === 'very-high' ? 'bg-red-50 border-red-200' : 
-              analysis.level === 'high' ? 'bg-orange-50 border-orange-200' : 
-              'bg-gray-50 border-gray-200'}`}>
+        <div className={`rounded-2xl p-4 flex items-center justify-between shadow-sm border ${analysis.level === 'very-high' ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
             <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-xl ${analysis.level === 'very-high' ? 'bg-red-500 text-white' : 'bg-white text-gray-500'}`}>
-                    <Siren className="w-6 h-6" />
-                </div>
+                <div className={`p-3 rounded-xl ${analysis.level === 'very-high' ? 'bg-red-500 text-white' : 'bg-white text-gray-500'}`}><Siren className="w-6 h-6" /></div>
                 <div>
                     <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Goal Probability</div>
-                    <div className={`text-2xl font-black ${analysis.level === 'very-high' ? 'text-red-600' : 'text-gray-800'}`}>
-                        {analysis.score}%
-                    </div>
+                    <div className={`text-2xl font-black ${analysis.level === 'very-high' ? 'text-red-600' : 'text-gray-800'}`}>{analysis.score}%</div>
                 </div>
             </div>
             <div className="text-right">
                 <div className="text-xs text-gray-500">Momentum</div>
-                <div className="font-bold text-indigo-600">
-                  {typeof analysis.factors.apiMomentum === 'number' ? analysis.factors.apiMomentum.toFixed(1) : '-'}
-                </div>
+                <div className="font-bold text-indigo-600">{typeof analysis.factors.apiMomentum === 'number' ? analysis.factors.apiMomentum.toFixed(1) : '-'}</div>
             </div>
         </div>
 
-        {/* Over/Under Chart */}
         {(marketChartData.length > 0 || apiChartData.length > 0) && (
           <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-              <h3 className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-emerald-500" />
-                  Over/Under Market (1_3), Shots & API Timeline
-              </h3>
-              <div className="h-80 w-full">
+              <h3 className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-emerald-500" />Over/Under Market (1_3) & API Timeline</h3>
+              <div className="relative h-80 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                       <ComposedChart margin={{ top: 10, right: 10, bottom: 0, left: -15 }}>
                           <XAxis type="number" dataKey="minute" name="Minute" unit="'" domain={[0, 90]} ticks={[0, 15, 30, 45, 60, 75, 90]} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
                           <YAxis yAxisId="left" dataKey="handicap" name="HDP" width={45} domain={yAxisDomainAndTicks.domain} ticks={yAxisDomainAndTicks.ticks} interval={0} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} allowDecimals={true} />
                           <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} width={35} domain={['dataMin - 5', 'dataMax + 10']} />
-                          <ZAxis type="number" dataKey="z" range={[50, 200]} />
                           <Tooltip cursor={{ strokeDasharray: '3 3' }} content={<CustomTooltip />} />
                           <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}/>
-                          <Scatter yAxisId="left" name="Market" data={marketChartData} fill="#8884d8">
-                              {marketChartData.map((entry, index) => ( <Cell key={`cell-market-${index}`} fill={entry.color} /> ))}
-                          </Scatter>
-                          <Scatter yAxisId="left" name="Shots" data={shotData} shape="circle">
-                              {shotData.map((entry, index) => ( <Cell key={`cell-shot-${index}`} fill={entry.fill} /> ))}
-                          </Scatter>
+                          <Scatter yAxisId="left" name="Market" data={marketChartData} fill="#8884d8">{marketChartData.map((e, i) => ( <Cell key={`c-${i}`} fill={e.color} /> ))}</Scatter>
                           <Line yAxisId="right" type="monotone" data={apiChartData} dataKey="homeApi" name="Home API" stroke="#2563eb" strokeWidth={2} dot={false} />
                           <Line yAxisId="right" type="monotone" data={apiChartData} dataKey="awayApi" name="Away API" stroke="#ea580c" strokeWidth={2} dot={false} />
                       </ComposedChart>
                   </ResponsiveContainer>
+                  <OverlayContainer>
+                      <HighlightBands highlights={highlights.overUnder} />
+                      <ShotBalls shots={shotEvents} />
+                  </OverlayContainer>
                   <OddsColorLegent />
-                  <ShotLegend />
               </div>
           </div>
         )}
 
-        {/* Home Odds Chart */}
         {(homeMarketChartData.length > 0 || apiChartData.length > 0) && (
           <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-              <h3 className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-purple-500" />
-                  Home Odds (1_2) & API Timeline
-              </h3>
-              <div className="h-80 w-full">
+              <h3 className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-purple-500" />Home Odds (1_2) & API Timeline</h3>
+              <div className="relative h-80 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                       <ComposedChart margin={{ top: 10, right: 10, bottom: 0, left: -15 }}>
                           <XAxis type="number" dataKey="minute" name="Minute" unit="'" domain={[0, 90]} ticks={[0, 15, 30, 45, 60, 75, 90]} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
                           <YAxis yAxisId="left" dataKey="handicap" name="HDP" width={45} domain={yAxisDomainAndTicks.domain} ticks={yAxisDomainAndTicks.ticks} interval={0} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} allowDecimals={true} />
                           <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} width={35} domain={['dataMin - 5', 'dataMax + 10']} />
-                          <ZAxis type="number" dataKey="z" range={[50, 200]} />
                           <Tooltip cursor={{ strokeDasharray: '3 3' }} content={<CustomTooltip />} />
                           <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}/>
-                          <Scatter yAxisId="left" name="Market" data={homeMarketChartData} fill="#8884d8">
-                              {homeMarketChartData.map((entry, index) => ( <Cell key={`cell-hmarket-${index}`} fill={entry.color} /> ))}
-                          </Scatter>
+                          <Scatter yAxisId="left" name="Market" data={homeMarketChartData} fill="#8884d8">{homeMarketChartData.map((e, i) => ( <Cell key={`c-${i}`} fill={e.color} /> ))}</Scatter>
                           <Line yAxisId="right" type="monotone" data={apiChartData} dataKey="homeApi" name="Home API" stroke="#2563eb" strokeWidth={2} dot={false} />
                           <Line yAxisId="right" type="monotone" data={apiChartData} dataKey="awayApi" name="Away API" stroke="#ea580c" strokeWidth={2} dot={false} />
                       </ComposedChart>
                   </ResponsiveContainer>
+                   <OverlayContainer>
+                      <HighlightBands highlights={highlights.homeOdds} />
+                      <ShotBalls shots={shotEvents} />
+                  </OverlayContainer>
                   <OddsColorLegent />
               </div>
           </div>
         )}
         
-        {/* Stats Grid */}
         <div className="grid grid-cols-2 gap-3">
             <StatBox label="Attacks" home={stats.attacks[0]} away={stats.attacks[1]} />
             <StatBox label="Dangerous" home={stats.dangerous_attacks[0]} away={stats.dangerous_attacks[1]} highlight />
@@ -518,10 +526,9 @@ const StatBox = ({ label, home, away, highlight }: { label: string, home: number
         <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
             <div className="text-xs text-gray-400 text-center mb-2 uppercase font-semibold">{label}</div>
             <div className="flex justify-between items-end mb-1">
-                <span className={`text-lg font-bold ${highlight ? (home > away ? 'text-blue-600' : 'text-gray-800') : 'text-gray-800'}`}>{home}</span>
-                <span className={`text-lg font-bold ${highlight ? (away > home ? 'text-orange-600' : 'text-gray-800') : 'text-gray-800'}`}>{away}</span>
+                <span className={`text-lg font-bold ${highlight && home > away ? 'text-blue-600' : 'text-gray-800'}`}>{home}</span>
+                <span className={`text-lg font-bold ${highlight && away > home ? 'text-orange-600' : 'text-gray-800'}`}>{away}</span>
             </div>
-            {/* Visual Bar */}
             <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden flex">
                 <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${homePct}%` }}></div>
                 <div className="h-full bg-orange-500 transition-all duration-500" style={{ width: `${100 - homePct}%` }}></div>

@@ -10,13 +10,13 @@
         z-index: 5;
     }
     .highlight-weak {
-        background: rgba(255, 255, 0, 0.45); /* yellow */
+        background-color: rgba(255, 255, 0, 0.45); /* yellow */
     }
     .highlight-medium {
-        background: rgba(255, 165, 0, 0.55); /* orange */
+        background-color: rgba(255, 165, 0, 0.55); /* orange */
     }
     .highlight-strong {
-        background: rgba(255, 60, 60, 0.60); /* red */
+        background-color: rgba(255, 60, 60, 0.60); /* red */
     }
     .highlight-label {
         @apply absolute text-white bg-black bg-opacity-70 rounded-md text-xs font-bold px-2 py-1 whitespace-nowrap;

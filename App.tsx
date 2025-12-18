@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { MatchList } from './components/MatchList';
 import { Dashboard } from './components/Dashboard';
@@ -6,6 +7,8 @@ import { getInPlayEvents, getMatchDetails } from './services/api';
 import { KeyRound, ShieldCheck } from 'lucide-react';
 
 const App = () => {
+  const REFRESH_INTERVAL_MS = 20000; // 20s refresh interval
+
   const [token, setToken] = useState('');
   const [hasToken, setHasToken] = useState(false);
   const [currentMatch, setCurrentMatch] = useState<MatchInfo | null>(null);
@@ -53,7 +56,7 @@ const App = () => {
     };
 
     fetchEvents();
-    const interval = setInterval(fetchEvents, 20000); // 20s refresh
+    const interval = setInterval(fetchEvents, REFRESH_INTERVAL_MS);
     
     return () => {
       isMounted = false;

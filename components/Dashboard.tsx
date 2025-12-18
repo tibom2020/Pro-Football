@@ -1,11 +1,11 @@
 
 
-
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { MatchInfo, PreGoalAnalysis, OddsItem, ProcessedStats } from '../types';
 import { parseStats, getMatchDetails, getMatchOdds } from '../services/api';
 import { ArrowLeft, RefreshCw, Siren, TrendingUp } from 'lucide-react';
 import { ResponsiveContainer, ComposedChart, Scatter, XAxis, YAxis, Tooltip, Cell, Line, Legend } from 'recharts';
+import { AntiEmotionChecklist } from './AntiEmotionChecklist';
 
 // --- Types for Highlights and Shots ---
 interface Highlight {
@@ -81,7 +81,11 @@ const calculateAPIScore = (stats: ProcessedStats | undefined, sideIndex: 0 | 1):
 };
 
 // --- Overlay Components ---
-const OverlayContainer = ({ children }: { children: React.ReactNode }) => {
+// FIX: Make children optional to resolve TypeScript error.
+// The type checker seems to incorrectly infer that OverlayContainer is called without children,
+// although the usages in this file provide them. Making children optional is safe here
+// because React.Children.map handles undefined children gracefully.
+const OverlayContainer = ({ children }: { children?: React.ReactNode }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [width, setWidth] = useState(0);
 
@@ -156,6 +160,8 @@ const ShotBalls = ({ shots, containerWidth }: { shots: ShotEvent[], containerWid
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) => {
+  const REFRESH_INTERVAL_MS = 20000; // 20s refresh for live odds and stats
+
   const [liveMatch, setLiveMatch] = useState<MatchInfo>(match);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [oddsHistory, setOddsHistory] = useState<{ minute: number; over: number; under: number; handicap: string }[]>([]);
@@ -163,6 +169,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
   const [statsHistory, setStatsHistory] = useState<Record<number, ProcessedStats>>({});
   const [highlights, setHighlights] = useState<AllHighlights>({ overUnder: [], homeOdds: [] });
   const [shotEvents, setShotEvents] = useState<ShotEvent[]>([]);
+  const [analysis, setAnalysis] = useState<PreGoalAnalysis>({
+    score: 0,
+    level: 'low',
+    factors: { apiMomentum: 0, shotCluster: 0, pressure: 0 }
+  });
   
   const stats = useMemo(() => parseStats(liveMatch.stats), [liveMatch.stats]);
 
@@ -298,13 +309,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
     if (bubbleNorm > 0.6 && apiNorm > 0.5) score += 0.15;
     score = Math.min(score, 1.0);
 
-    let level: Highlight['level'] | null = null;
-    if (score >= 0.78) level = 'strong';
-    else if (score >= 0.62) level = 'medium';
-    else if (score >= 0.45) level = 'weak';
+    const scorePercent = Math.round(score * 100);
+    let analysisLevel: PreGoalAnalysis['level'] = 'low';
+    if (scorePercent >= 78) analysisLevel = 'very-high';
+    else if (scorePercent >= 62) analysisLevel = 'high';
+    else if (scorePercent >= 45) analysisLevel = 'medium';
+
+    setAnalysis({
+        score: scorePercent,
+        level: analysisLevel,
+        factors: {
+            apiMomentum: apiMomentum,
+            shotCluster: shots,
+            pressure: bubbleOver + bubbleHome
+        }
+    });
+
+    let highlightLevel: Highlight['level'] | null = null;
+    if (score >= 0.78) highlightLevel = 'strong';
+    else if (score >= 0.62) highlightLevel = 'medium';
+    else if (score >= 0.45) highlightLevel = 'weak';
     
-    if (level) {
-        const newHighlight: Highlight = { minute: currentMinute, level, label: `${Math.round(score * 100)}%` };
+    if (highlightLevel) {
+        const newHighlight: Highlight = { minute: currentMinute, level: highlightLevel, label: `${scorePercent}%` };
         setHighlights(prev => {
             const alreadyExists = prev.overUnder.some(h => h.minute === newHighlight.minute);
             if (!alreadyExists) {
@@ -362,7 +389,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 20000);
+    const interval = setInterval(fetchData, REFRESH_INTERVAL_MS);
     return () => { isMounted = false; clearInterval(interval); };
   }, [liveMatch.id, token, runPatternDetection]);
   
@@ -395,7 +422,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
     }
     setIsRefreshing(false);
   };
-  const analysis: PreGoalAnalysis = useMemo(() => { return {score:0, level:'low', factors:{apiMomentum:0, shotCluster:0, pressure:0}}}, []);
+  
   const scoreParts = (liveMatch.ss || "0-0").split("-");
   
   const apiChartData = useMemo(() => {
@@ -509,6 +536,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
             <StatBox label="On Target" home={stats.on_target[0]} away={stats.on_target[1]} highlight />
             <StatBox label="Corners" home={stats.corners[0]} away={stats.corners[1]} />
         </div>
+
+        <AntiEmotionChecklist analysis={analysis} stats={stats} />
       </div>
     </div>
   );

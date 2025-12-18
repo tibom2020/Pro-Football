@@ -8,31 +8,29 @@
         @apply absolute bottom-0 h-7 w-1.5 pointer-events-none rounded-md shadow-md;
         transform: translateX(-50%);
         z-index: 5;
+        background-color: white; /* Make all highlight bands white */
     }
-    .highlight-weak {
-        background-color: rgba(255, 255, 0, 0.45); /* yellow */
-    }
-    .highlight-medium {
-        background-color: rgba(255, 165, 0, 0.55); /* orange */
-    }
-    .highlight-strong {
-        background-color: rgba(255, 60, 60, 0.60); /* red */
-    }
+    /* Specific highlight level classes no longer set background-color for the band itself */
+    .highlight-weak {}
+    .highlight-medium {}
+    .highlight-strong {}
+    
     .highlight-label {
-        @apply absolute text-white bg-black bg-opacity-70 rounded-md text-xs font-bold px-2 py-1 whitespace-nowrap;
+        @apply absolute rounded-md text-xs font-bold px-2 py-1 whitespace-nowrap;
         bottom: -28px; /* Position below the band */
         left: 50%;
         transform: translateX(-50%);
+        /* Default text color, overridden by level-specific classes below */
+        @apply text-white; 
     }
-    .ball-icon {
-        @apply absolute w-5 h-5 rounded-full flex items-center justify-center text-white text-xs leading-none shadow-md pointer-events-none transition-all duration-200 ease-in-out opacity-95;
-        z-index: 10;
-        font-size: 12px;
+    /* New classes for label colors based on highlight level */
+    .label-color-weak {
+        @apply bg-yellow-400 text-slate-800; /* Yellow background, dark text for contrast */
     }
-    .ball-on {
-        background-color: #2563eb; /* blue */
+    .label-color-medium {
+        @apply bg-orange-500 text-white; /* Orange background, white text */
     }
-    .ball-off {
-        background-color: #facc15; /* yellow */
+    .label-color-strong {
+        @apply bg-red-600 text-white; /* Red background, white text */
     }
 }

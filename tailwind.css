@@ -8,12 +8,18 @@
         @apply absolute bottom-0 h-7 w-1.5 pointer-events-none rounded-md shadow-md;
         transform: translateX(-50%);
         z-index: 5;
-        background-color: white; /* Make all highlight bands white */
+        /* background-color: white; Removed fixed white background */
     }
-    /* Specific highlight level classes no longer set background-color for the band itself */
-    .highlight-weak {}
-    .highlight-medium {}
-    .highlight-strong {}
+    /* Specific highlight level classes now set background-color for the band itself */
+    .highlight-weak {
+        @apply bg-yellow-400; /* Yellow background for weak highlights */
+    }
+    .highlight-medium {
+        @apply bg-orange-500; /* Orange background for medium highlights */
+    }
+    .highlight-strong {
+        @apply bg-red-600; /* Red background for strong highlights */
+    }
     
     .highlight-label {
         @apply absolute rounded-md text-xs font-bold px-2 py-1 whitespace-nowrap;

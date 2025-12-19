@@ -119,7 +119,7 @@ const HighlightBands = ({ highlights, containerWidth }: { highlights: Highlight[
 
     return <>
         {highlights.map((h, i) => (
-            <div key={i} className={`goal-highlight`} style={{ left: `${calculateLeft(h.minute)}px` }}>
+            <div key={i} className={`goal-highlight highlight-${h.level}`} style={{ left: `${calculateLeft(h.minute)}px` }}>
                 <div className={`highlight-label label-color-${h.level}`}>{h.label}</div>
             </div>
         ))}

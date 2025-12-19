@@ -134,7 +134,7 @@ const ShotBalls = ({ shots, containerWidth }: { shots: ShotEvent[], containerWid
         const yAxisRightWidth = 35;
         const chartAreaWidth = containerWidth - yAxisLeftWidth - yAxisRightWidth;
         const leftOffset = yAxisLeftWidth;
-        return leftOffset + (minute / 90) * chartAreaWidth - 10; // Center the ball
+        return leftOffset + (minute / 90) * chartAreaWidth - 10; // Center the ball (20px wide)
     };
 
     const shotsByMinute = shots.reduce((acc, shot) => {
@@ -149,7 +149,7 @@ const ShotBalls = ({ shots, containerWidth }: { shots: ShotEvent[], containerWid
                  <div 
                     key={`${minute}-${index}`} 
                     className={`ball-icon ${type === 'on' ? 'ball-on' : 'ball-off'}`}
-                    style={{ left: `${calculateLeft(Number(minute))}px`, top: `${6 + index * 24}px` }}
+                    style={{ left: `${calculateLeft(Number(minute))}px`, top: `${-10 + index * 24}px` }}
                     title={`Shot ${type}-target at ${minute}'`}
                 >
                     ⚽

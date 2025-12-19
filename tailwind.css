@@ -39,4 +39,18 @@
     .label-color-strong {
         @apply bg-red-600 text-white; /* Red background, white text */
     }
+
+    /* Styles for shot balls */
+    .ball-icon {
+        @apply absolute w-5 h-5 flex items-center justify-center rounded-full text-sm leading-none font-bold;
+        z-index: 6; /* Ensure balls are above highlights */
+        transform: translateX(-50%);
+        box-sizing: border-box; /* Include padding and border in the element's total width and height */
+    }
+    .ball-on {
+        @apply bg-blue-50 text-blue-700 border-2 border-blue-500; /* Light blue background, blue text, blue border */
+    }
+    .ball-off {
+        @apply bg-gray-50 text-gray-500 border-2 border-gray-300; /* Light grey background, grey text, grey border */
+    }
 }

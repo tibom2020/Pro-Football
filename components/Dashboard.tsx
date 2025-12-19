@@ -1,11 +1,9 @@
 
-
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { MatchInfo, PreGoalAnalysis, OddsItem, ProcessedStats } from '../types';
 import { parseStats, getMatchDetails, getMatchOdds } from '../services/api';
 import { ArrowLeft, RefreshCw, Siren, TrendingUp } from 'lucide-react';
 import { ResponsiveContainer, ComposedChart, Scatter, XAxis, YAxis, Tooltip, Cell, Line, Legend } from 'recharts';
-import { AntiEmotionChecklist } from './AntiEmotionChecklist';
 import { LiveStatsTable } from './LiveStatsTable'; // Import the new component
 
 // --- Types for Highlights and Shots ---
@@ -118,9 +116,25 @@ const HighlightBands = ({ highlights, containerWidth }: { highlights: Highlight[
         return leftOffset + (minute / 90) * chartAreaWidth;
     };
 
+    const getHighlightColor = (level: Highlight['level']) => {
+      switch (level) {
+        case 'strong': return '#dc2626'; // Tailwind red-600
+        case 'medium': return '#f97316'; // Tailwind orange-500
+        case 'weak': return '#facc15';   // Tailwind yellow-400
+        default: return '#cbd5e1';       // Tailwind slate-300 as fallback
+      }
+    };
+
     return <>
         {highlights.map((h, i) => (
-            <div key={i} className={`goal-highlight highlight-${h.level}`} style={{ left: `${calculateLeft(h.minute)}px` }}>
+            <div 
+                key={i} 
+                className={`goal-highlight`} 
+                style={{ 
+                    left: `${calculateLeft(h.minute)}px`,
+                    backgroundColor: getHighlightColor(h.level) // Apply color directly
+                }}
+            >
                 <div className={`highlight-label label-color-${h.level}`}>{h.label}</div>
             </div>
         ))}
@@ -161,7 +175,7 @@ const ShotBalls = ({ shots, containerWidth }: { shots: ShotEvent[], containerWid
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) => {
-  const REFRESH_INTERVAL_MS = 60000; // Increased to 60s refresh for live odds and stats
+  const REFRESH_INTERVAL_MS = 120000; // Increased to 120s (2 minutes) refresh for live odds and stats
 
   const [liveMatch, setLiveMatch] = useState<MatchInfo>(match);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -545,8 +559,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
             <StatBox label="On Target" home={stats.on_target[0]} away={stats.on_target[1]} highlight />
             <StatBox label="Corners" home={stats.corners[0]} away={stats.corners[1]} />
         </div>
-
-        <AntiEmotionChecklist analysis={analysis} stats={stats} />
       </div>
     </div>
   );

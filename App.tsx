@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { MatchList } from './components/MatchList';
 import { Dashboard } from './components/Dashboard';
@@ -7,7 +8,7 @@ import { getInPlayEvents, getMatchDetails } from './services/api';
 import { KeyRound, ShieldCheck } from 'lucide-react';
 
 const App = () => {
-  const REFRESH_INTERVAL_MS = 20000; // 20s refresh interval
+  const REFRESH_INTERVAL_MS = 60000; // Increased to 60s refresh interval
 
   const [token, setToken] = useState('');
   const [hasToken, setHasToken] = useState(false);
@@ -41,9 +42,14 @@ const App = () => {
         }
       } catch (err: any) {
         if (isMounted) {
-          if (err instanceof TypeError && err.message === 'Failed to fetch') {
-            setError('Lỗi mạng hoặc CORS. Vui lòng kiểm tra console của trình duyệt để biết thêm chi tiết.');
-          } else {
+          if (err.message.includes('429')) {
+             setError("Giới hạn tần suất của Proxy đã đạt. Vui lòng chờ 1 phút hoặc thử lại với Token API khác.");
+          } else if (err.message.includes('Lỗi mạng hoặc CORS')) {
+            setError('Lỗi mạng hoặc CORS. Vui lòng kiểm tra kết nối internet của bạn.');
+          } else if (err.message.includes('API đã trả về phản hồi trống')) {
+            setError('API đã trả về phản hồi trống hoặc không có dữ liệu. Vui lòng thử lại sau hoặc kiểm tra Token API của bạn.');
+          }
+          else {
             setError(err.message || 'Đã xảy ra lỗi không xác định.');
           }
           setEvents([]);
@@ -148,6 +154,9 @@ const App = () => {
             <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4 rounded-md" role="alert">
                 <p className="font-bold">Lỗi</p>
                 <p>{error}</p>
+                <p className="mt-2 text-xs text-red-600">
+                  Vui lòng kiểm tra Token API của bạn hoặc thử lại sau vài phút nếu đây là lỗi giới hạn tần suất.
+                </p>
             </div>
         )}
         <MatchList 

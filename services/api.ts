@@ -62,34 +62,54 @@ const mockOdds: OddsData = {
 };
 
 /**
- * Performs a proxied fetch and handles common API/Proxy errors.
+ * Performs a proxied fetch and handles common API/Proxy errors with retry logic for 429.
  */
-const safeFetch = async (url: string) => {
+const safeFetch = async (url: string, retries = 0): Promise<any> => {
+    const MAX_RETRIES = 3;
+    const INITIAL_RETRY_DELAY_MS = 2000; // 2 seconds
+
     const proxiedUrl = `${PROXY_URL}${encodeURIComponent(url)}`;
-    const response = await fetch(proxiedUrl);
     
-    if (response.status === 403) {
-      throw new Error("Access Forbidden (403). B365 or the Proxy is blocking this request. Check your API Token or try again later.");
-    }
-    
-    if (response.status === 429) {
-      throw new Error("Too Many Requests (429). Proxy rate limit reached.");
-    }
-
-    if (!response.ok) {
-      throw new Error(`Connection Error: ${response.status} ${response.statusText}`);
-    }
-
-    const text = await response.text();
-    if (!text || text.trim().length === 0) {
-        throw new Error("The API returned an empty response.");
-    }
-
     try {
-        return JSON.parse(text);
-    } catch (e) {
-        console.error("JSON Parse Error. Raw response:", text);
-        throw new Error("The API response was not valid JSON. Ensure your token is correct.");
+        const response = await fetch(proxiedUrl);
+        
+        if (response.status === 403) {
+          throw new Error("Lỗi truy cập (403). B365 hoặc Proxy đang chặn yêu cầu này. Vui lòng kiểm tra lại Token API hoặc thử lại sau.");
+        }
+        
+        if (response.status === 429) {
+          if (retries < MAX_RETRIES) {
+            const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, retries);
+            console.warn(`Quá nhiều yêu cầu (429). Đang thử lại sau ${delay / 1000} giây... (Lần thử: ${retries + 1}/${MAX_RETRIES})`);
+            await new Promise(res => setTimeout(res, delay));
+            return safeFetch(url, retries + 1); // Retry the fetch
+          } else {
+            throw new Error("Quá nhiều yêu cầu (429). Đã đạt giới hạn tần suất của Proxy sau nhiều lần thử. Vui lòng chờ một lát rồi thử lại.");
+          }
+        }
+
+        if (!response.ok) {
+          throw new Error(`Lỗi kết nối: ${response.status} ${response.statusText}. Vui lòng kiểm tra kết nối mạng của bạn.`);
+        }
+
+        const text = await response.text();
+        // If the response is empty, return null gracefully instead of throwing an error
+        if (!text || text.trim().length === 0) {
+            console.warn(`API đã trả về phản hồi trống cho URL: ${url}. Đang xử lý như không có dữ liệu.`);
+            return null; 
+        }
+
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            console.error("Lỗi phân tích JSON. Phản hồi thô:", text);
+            throw new Error("Phản hồi API không phải là JSON hợp lệ. Đảm bảo Token của bạn là chính xác.");
+        }
+    } catch (error) {
+        if (error instanceof TypeError && error.message === 'Failed to fetch') {
+            throw new Error('Lỗi mạng hoặc CORS. Vui lòng kiểm tra kết nối internet hoặc cài đặt CORS của trình duyệt.');
+        }
+        throw error;
     }
 };
 
@@ -103,8 +123,13 @@ export const getInPlayEvents = async (token: string): Promise<MatchInfo[]> => {
     const targetUrl = `${B365_API_INPLAY}?sport_id=1&token=${token}`;
     const data = await safeFetch(targetUrl);
     
+    if (data === null) { // Handle graceful null return for empty response
+        console.warn(`getInPlayEvents: Nhận được phản hồi trống. Không có sự kiện nào được tải.`);
+        return [];
+    }
+    
     if (data.success !== 1 && data.success !== "1") {
-        throw new Error(data.error || 'The API returned a failure status.');
+        throw new Error(data.error || 'API đã trả về trạng thái thất bại.');
     }
     
     const results = data.results || [];
@@ -125,6 +150,11 @@ export const getMatchDetails = async (token: string, eventId: string): Promise<M
   try {
     const targetUrl = `${B365_API_INPLAY}?sport_id=1&token=${token}`;
     const data = await safeFetch(targetUrl);
+
+    if (data === null) { // Handle graceful null return for empty response
+        console.warn(`getMatchDetails: Nhận được phản hồi trống cho sự kiện ${eventId}.`);
+        return null;
+    }
     
     const results: MatchInfo[] = data.results || [];
     const match = results.find(e => e.id === eventId);
@@ -149,8 +179,13 @@ export const getMatchOdds = async (token: string, eventId: string): Promise<Odds
     const targetUrl = `${B365_API_ODDS}?token=${token}&event_id=${eventId}`;
     const data = await safeFetch(targetUrl);
     
+    if (data === null) { // Handle graceful null return for empty response
+        console.warn(`getMatchOdds: Nhận được phản hồi trống hoặc không có dữ liệu tỷ lệ cược cho sự kiện ${eventId}.`);
+        return null;
+    }
+
     if (!data || data.success === 0 || data.success === "0") {
-        console.warn(`API reported failure fetching odds for event ${eventId}:`, data?.error || 'Unknown error');
+        console.warn(`API báo cáo lỗi khi lấy tỷ lệ cược cho sự kiện ${eventId}:`, data?.error || 'Lỗi không xác định');
         return null;
     }
     return data || null;

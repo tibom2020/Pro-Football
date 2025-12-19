@@ -6,6 +6,7 @@ import { parseStats, getMatchDetails, getMatchOdds } from '../services/api';
 import { ArrowLeft, RefreshCw, Siren, TrendingUp } from 'lucide-react';
 import { ResponsiveContainer, ComposedChart, Scatter, XAxis, YAxis, Tooltip, Cell, Line, Legend } from 'recharts';
 import { AntiEmotionChecklist } from './AntiEmotionChecklist';
+import { LiveStatsTable } from './LiveStatsTable'; // Import the new component
 
 // --- Types for Highlights and Shots ---
 interface Highlight {
@@ -160,7 +161,7 @@ const ShotBalls = ({ shots, containerWidth }: { shots: ShotEvent[], containerWid
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) => {
-  const REFRESH_INTERVAL_MS = 20000; // 20s refresh for live odds and stats
+  const REFRESH_INTERVAL_MS = 60000; // Increased to 60s refresh for live odds and stats
 
   const [liveMatch, setLiveMatch] = useState<MatchInfo>(match);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -479,6 +480,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
                 <div className="font-bold text-indigo-600">{typeof analysis.factors.apiMomentum === 'number' ? analysis.factors.apiMomentum.toFixed(1) : '-'}</div>
             </div>
         </div>
+
+        {/* New Live Stats Table */}
+        <LiveStatsTable
+          liveMatch={liveMatch}
+          oddsHistory={oddsHistory}
+          homeOddsHistory={homeOddsHistory}
+          apiChartData={apiChartData}
+        />
 
         {(marketChartData.length > 0 || apiChartData.length > 0) && (
           <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">

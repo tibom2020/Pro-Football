@@ -36,7 +36,7 @@ export const LiveStatsTable: React.FC<LiveStatsTableProps> = ({
     <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 mt-4">
       <h3 className="text-sm font-bold text-gray-700 mb-3">Live Statistics</h3>
       <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        <StatItem label="Minute" value={`${currentMinute}'`} />
+        <StatItem label="HDP Home" value={latestHomeOdds?.handicap ? parseFloat(latestHomeOdds.handicap).toFixed(2) : '-'} />
         <StatItem label="HDP" value={latestOdds?.handicap ? parseFloat(latestOdds.handicap).toFixed(2) : '-'} />
         <StatItem label="Home Odds" value={latestHomeOdds?.home ? latestHomeOdds.home.toFixed(3) : '-'} />
         <StatItem label="Over Odds" value={latestOdds?.over ? latestOdds.over.toFixed(3) : '-'} />

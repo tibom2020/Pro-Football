@@ -19,8 +19,10 @@ const B365_API_INPLAY = "https://api.b365api.com/v3/events/inplay";
 const B365_API_ODDS = "https://api.b365api.com/v2/event/odds";
 
 // --- Client-side Rate Limiting Configuration ---
-// Enforce a strict minimum 30-second interval between ANY two API calls to provide a robust buffer against proxy's 20s limit.
-const MIN_API_CALL_INTERVAL = 30 * 1000; // 30 seconds
+// Enforce a strict minimum 45-second interval between ANY two API calls.
+// This provides a robust buffer against the Cloudflare Worker's 20-second rate limit,
+// accounting for network latency and potential retries.
+const MIN_API_CALL_INTERVAL = 45 * 1000; // 45 seconds
 let lastApiCallTime = 0; // Timestamp of the last API call initiated
 
 /**
@@ -107,6 +109,8 @@ const safeFetch = async (url: string, retries = 0): Promise<any> => {
     // The worker expects the original B365 URL as a 'target' query parameter
     const proxiedUrl = `${PROXY_URL}?target=${encodeURIComponent(url)}`;
     
+    console.debug('Attempting to fetch proxied URL:', proxiedUrl); // Added debug log
+
     try {
         const response = await fetch(proxiedUrl);
         
@@ -122,7 +126,7 @@ const safeFetch = async (url: string, retries = 0): Promise<any> => {
             return safeFetch(url, retries + 1); // Retry the fetch
           } else {
             // Updated 429 error message
-            throw new Error("Quá nhiều yêu cầu (429). Đã đạt giới hạn tần suất của Proxy sau nhiều lần thử. Vui lòng kiểm tra cấu hình Rate Limiter của Cloudflare Worker và thử lại sau 20-40 giây.");
+            throw new Error("Giới hạn tần suất của Cloudflare Worker đã đạt sau nhiều lần thử. Vui lòng kiểm tra cấu hình Rate Limiter của Worker (thường là 1 yêu cầu/20s) và thử lại sau ít nhất 20-40 giây.");
           }
         }
 
@@ -146,8 +150,15 @@ const safeFetch = async (url: string, retries = 0): Promise<any> => {
         }
     } catch (error) {
         if (error instanceof TypeError && error.message === 'Failed to fetch') {
-            // Enhanced error message for network/CORS
-            throw new Error('Lỗi mạng hoặc CORS. Vui lòng kiểm tra kết nối internet, đảm bảo Cloudflare Worker của bạn đang hoạt động và đã được cấu hình CORS chính xác (Access-Control-Allow-Origin: *).');
+            // Updated error message for network/CORS to be more specific
+            throw new Error(
+                'Lỗi mạng hoặc CORS: Trình duyệt không thể kết nối tới Cloudflare Worker. ' +
+                'Vui lòng kiểm tra các điều sau:\n' +
+                '1. URL của Cloudflare Worker trong `services/api.ts` có chính xác không.\n' +
+                '2. Cloudflare Worker của bạn đã được triển khai (Deploy) và đang hoạt động.\n' +
+                '3. Kết nối internet của bạn ổn định.\n' +
+                '4. Không có phần mềm chặn mạng (ví dụ: VPN, tường lửa, tiện ích mở rộng trình duyệt) nào can thiệp.'
+            );
         }
         throw error;
     }

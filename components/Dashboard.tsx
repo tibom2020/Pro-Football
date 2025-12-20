@@ -175,7 +175,7 @@ const ShotBalls = ({ shots, containerWidth }: { shots: ShotEvent[], containerWid
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) => {
-  // const REFRESH_INTERVAL_MS = 120000; // Removed automatic refresh for individual match
+  const AUTO_REFRESH_INTERVAL_MS = 20000; // 20 seconds for individual match auto-refresh
 
   const [liveMatch, setLiveMatch] = useState<MatchInfo>(match);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -369,76 +369,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
     }
   }, [liveMatch.id, token, statsHistory, marketChartData, homeMarketChartData]); // Added token and liveMatch.id as dependencies
 
-  // Main Data Fetching Effect (modified to run once on mount)
-  useEffect(() => {
-    let isMounted = true;
-    const fetchData = async () => {
-      if (!isMounted) return;
 
-      const [detailsData, oddsData] = await Promise.all([
-        getMatchDetails(token, liveMatch.id),
-        getMatchOdds(token, liveMatch.id),
-      ]);
-
-      if (isMounted) {
-        if (detailsData) {
-          setLiveMatch(detailsData);
-          const currentTime = detailsData.timer?.tm;
-          if (currentTime && detailsData.stats) {
-            setStatsHistory(prev => ({ ...prev, [currentTime]: parseStats(detailsData.stats) }));
-          }
-        }
-        if (oddsData) {
-            const overMarkets = oddsData.results?.odds?.['1_3'];
-            if (overMarkets) {
-                // Simplified processing, assuming main market is what we get
-                const newHistory = overMarkets
-                    .filter(m => m.time_str && m.over_od && m.under_od && m.handicap)
-                    .map(m => ({ minute: parseInt(m.time_str), over: parseFloat(m.over_od!), under: parseFloat(m.under_od!), handicap: m.handicap! }))
-                    .sort((a, b) => a.minute - b.minute);
-                setOddsHistory(newHistory);
-            }
-            const homeMarkets = oddsData.results?.odds?.['1_2'];
-            if (homeMarkets) {
-                const newHomeHistory = homeMarkets
-                    .filter(m => m.time_str && m.home_od && m.away_od && m.handicap)
-                    .map(m => ({ minute: parseInt(m.time_str), home: parseFloat(m.home_od!), handicap: m.handicap! }))
-                    .sort((a,b) => a.minute - b.minute);
-                setHomeOddsHistory(newHomeHistory);
-            }
-        }
-        // Run detection after data update
-        runPatternDetection();
-      }
-    };
-
-    fetchData(); // Initial fetch when component mounts
-    // Removed setInterval for automatic refresh
-    return () => { isMounted = false; /* No clearInterval needed */ };
-  }, [liveMatch.id, token, runPatternDetection]);
-  
-  // Effect to update shot events from stats history
-  useEffect(() => {
-      const allTimes = Object.keys(statsHistory).map(Number).sort((a,b)=>a-b);
-      if (allTimes.length < 2) return;
-      const newShots: ShotEvent[] = [];
-      for(let i=1; i<allTimes.length; i++) {
-          const t = allTimes[i];
-          const prevT = allTimes[i-1];
-          const stat = statsHistory[t];
-          const prevStat = statsHistory[prevT];
-          if(!stat || !prevStat) continue;
-
-          const onTargetDelta = (stat.on_target[0] + stat.on_target[1]) - (prevStat.on_target[0] + prevStat.on_target[1]);
-          const offTargetDelta = (stat.off_target[0] + stat.off_target[1]) - (prevStat.off_target[0] + prevStat.off_target[1]);
-          
-          for(let j=0; j<onTargetDelta; j++) newShots.push({ minute: t, type: 'on' });
-          for(let j=0; j<offTargetDelta; j++) newShots.push({ minute: t, type: 'off' });
-      }
-      setShotEvents(newShots);
-  }, [statsHistory]);
-
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
     // Fetch all relevant data for the current match
     const [detailsData, oddsData] = await Promise.all([
@@ -473,8 +405,58 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
     }
     runPatternDetection(); // Run analysis after refreshing data
     setIsRefreshing(false);
-  };
+  }, [token, liveMatch.id, runPatternDetection, setLiveMatch, setStatsHistory, setOddsHistory, setHomeOddsHistory]);
   
+  // Main Data Fetching Effect (initial fetch and interval setup)
+  useEffect(() => {
+    let isMounted = true;
+    // FIX: Use `number` for intervalId as `NodeJS.Timeout` is not for browser environments.
+    let intervalId: number; 
+
+    const performFetchAndSetupInterval = async () => {
+      if (isMounted) {
+        // Perform initial fetch
+        await handleRefresh();
+
+        // Set up interval for automatic refresh
+        intervalId = setInterval(() => {
+          if (isMounted) {
+            handleRefresh();
+          }
+        }, AUTO_REFRESH_INTERVAL_MS);
+      }
+    };
+
+    performFetchAndSetupInterval();
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId); // Ensure intervalId is cleared
+    };
+  }, [liveMatch.id, token, handleRefresh, AUTO_REFRESH_INTERVAL_MS]);
+  
+  // Effect to update shot events from stats history
+  useEffect(() => {
+      const allTimes = Object.keys(statsHistory).map(Number).sort((a,b)=>a-b);
+      if (allTimes.length < 2) return;
+      const newShots: ShotEvent[] = [];
+      for(let i=1; i<allTimes.length; i++) {
+          const t = allTimes[i];
+          const prevT = allTimes[i-1];
+          const stat = statsHistory[t];
+          const prevStat = statsHistory[prevT];
+          if(!stat || !prevStat) continue;
+
+          const onTargetDelta = (stat.on_target[0] + stat.on_target[1]) - (prevStat.on_target[0] + prevStat.on_target[1]);
+          const offTargetDelta = (stat.off_target[0] + stat.off_target[1]) - (prevStat.off_target[0] + prevStat.off_target[1]);
+          
+          for(let j=0; j<onTargetDelta; j++) newShots.push({ minute: t, type: 'on' });
+          for(let j=0; j<offTargetDelta; j++) newShots.push({ minute: t, type: 'off' });
+      }
+      setShotEvents(newShots);
+  }, [statsHistory]);
+
+
   const scoreParts = (liveMatch.ss || "0-0").split("-");
   
   const apiChartData = useMemo(() => {

@@ -5,53 +5,39 @@ import { MatchInfo, OddsData } from '../types';
  * PROXY STRATEGY:
  * B365 API often blocks common public proxies like allorigins or corsproxy.io.
  * For personal projects, a private proxy like a Cloudflare Worker is recommended
- * for better reliability and rate limit control.
+ * for better reliability and and custom logic.
  *
  * REPLACE THE URL BELOW WITH YOUR OWN CLOUDFLARE WORKER URL.
  * Example: "https://YOUR_WORKER_NAME.YOUR_SUBDOMAIN.workers.dev/"
- * Make sure your Worker is configured to forward the 'target' query parameter.
+ * Make sure your Worker is configured to forward the 'target' query parameter
+ * and correctly sets CORS headers.
  */
 const PROXY_URL = "https://long-tooth-f7a5.phanvietlinh-0b1.workers.dev/"; 
 
 const B365_API_INPLAY = "https://api.b365api.com/v3/events/inplay";
 const B365_API_ODDS = "https://api.b365api.com/v2/event/odds";
 
-// --- Rate Limiting Configuration ---
-// Updated: 1 request per 20 seconds (which is 3 requests per minute)
-const REQUEST_LIMIT_PER_MINUTE = 3; 
-const WINDOW_SIZE_MS = 60 * 1000;    // 60 seconds
-const requestTimestamps: number[] = []; // Store timestamps of recent requests
+// --- Client-side Rate Limiting Configuration ---
+// Enforce a strict minimum 20-second interval between ANY two API calls
+const MIN_API_CALL_INTERVAL = 20 * 1000; // 20 seconds
+let lastApiCallTime = 0; // Timestamp of the last API call initiated
 
 /**
- * Ensures that API requests adhere to the client-side rate limit.
- * Will pause execution if the limit would be exceeded within the rolling window.
+ * Ensures that API requests adhere to a strict client-side rate limit.
+ * Will pause execution if the limit would be exceeded.
  */
 const enforceRateLimit = async () => {
     const now = Date.now();
+    const timeSinceLastCall = now - lastApiCallTime;
 
-    // Remove timestamps older than the window size
-    while (requestTimestamps.length > 0 && requestTimestamps[0] < now - WINDOW_SIZE_MS) {
-        requestTimestamps.shift();
+    if (timeSinceLastCall < MIN_API_CALL_INTERVAL) {
+        const waitTime = MIN_API_CALL_INTERVAL - timeSinceLastCall;
+        console.warn(`Client-side rate limit active. Waiting ${waitTime / 1000}s before next API call.`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
     }
-
-    // If we have reached the limit within the window, wait
-    if (requestTimestamps.length >= REQUEST_LIMIT_PER_MINUTE) {
-        const oldestRequestTime = requestTimestamps[0];
-        // Calculate wait time: (time when the oldest request exits the window) - now
-        const waitTime = (oldestRequestTime + WINDOW_SIZE_MS) - now;
-        if (waitTime > 0) {
-            console.warn(`Đạt giới hạn tần suất API phía Client (${REQUEST_LIMIT_PER_MINUTE}/phút). Đang chờ ${waitTime}ms...`);
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-        }
-        // After waiting, re-check and clean up any newly old timestamps
-        // This handles cases where multiple waits might have occurred
-        while (requestTimestamps.length > 0 && requestTimestamps[0] < Date.now() - WINDOW_SIZE_MS) {
-            requestTimestamps.shift();
-        }
-    }
-    
-    // Add current request's timestamp
-    requestTimestamps.push(Date.now());
+    // Update last API call time *after* any potential wait, and *before* the fetch attempt.
+    // This marks the start of the "next" allowed interval.
+    lastApiCallTime = Date.now(); 
 };
 
 
@@ -107,6 +93,7 @@ const mockOdds: OddsData = {
 
 /**
  * Performs a proxied fetch and handles common API/Proxy errors with retry logic for 429.
+ * Applies client-side rate limit before each fetch attempt.
  */
 const safeFetch = async (url: string, retries = 0): Promise<any> => {
     const MAX_RETRIES = 3;
@@ -129,16 +116,18 @@ const safeFetch = async (url: string, retries = 0): Promise<any> => {
         if (response.status === 429) {
           if (retries < MAX_RETRIES) {
             const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, retries);
-            console.warn(`Quá nhiều yêu cầu (429). Đang thử lại sau ${delay / 1000} giây... (Lần thử: ${retries + 1}/${MAX_RETRIES})`);
+            console.warn(`Quá nhiều yêu cầu (429) từ Proxy. Đang thử lại sau ${delay / 1000} giây... (Lần thử: ${retries + 1}/${MAX_RETRIES})`);
             await new Promise(res => setTimeout(res, delay));
             return safeFetch(url, retries + 1); // Retry the fetch
           } else {
-            throw new Error("Quá nhiều yêu cầu (429). Đã đạt giới hạn tần suất của Proxy sau nhiều lần thử. Vui lòng chờ một lát rồi thử lại.");
+            // Updated 429 error message
+            throw new Error("Quá nhiều yêu cầu (429). Đã đạt giới hạn tần suất của Proxy sau nhiều lần thử. Vui lòng kiểm tra cấu hình Rate Limiter của Cloudflare Worker và thử lại sau 20-40 giây.");
           }
         }
 
         if (!response.ok) {
-          throw new Error(`Lỗi kết nối: ${response.status} ${response.statusText}. Vui lòng kiểm tra kết nối mạng của bạn.`);
+            // Enhanced error message for clarity
+            throw new Error(`Lỗi kết nối: ${response.status} ${response.statusText}. Vui lòng kiểm tra kết nối mạng của bạn hoặc trạng thái của Cloudflare Worker.`);
         }
 
         const text = await response.text();
@@ -152,11 +141,12 @@ const safeFetch = async (url: string, retries = 0): Promise<any> => {
             return JSON.parse(text);
         } catch (e) {
             console.error("Lỗi phân tích JSON. Phản hồi thô:", text);
-            throw new Error("Phản hồi API không phải là JSON hợp lệ. Đảm bảo Token của bạn là chính xác.");
+            throw new Error("Phản hồi API không phải là JSON hợp lệ. Đảm bảo Token của bạn là chính xác và Worker hoạt động đúng.");
         }
     } catch (error) {
         if (error instanceof TypeError && error.message === 'Failed to fetch') {
-            throw new Error('Lỗi mạng hoặc CORS. Vui lòng kiểm tra kết nối internet hoặc cài đặt CORS của trình duyệt.');
+            // Enhanced error message for network/CORS
+            throw new Error('Lỗi mạng hoặc CORS. Vui lòng kiểm tra kết nối internet, đảm bảo Cloudflare Worker của bạn đang hoạt động và đã được cấu hình CORS chính xác (Access-Control-Allow-Origin: *).');
         }
         throw error;
     }

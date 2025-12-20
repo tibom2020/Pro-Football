@@ -7,7 +7,7 @@ import { getInPlayEvents, getMatchDetails } from './services/api';
 import { KeyRound, ShieldCheck, RefreshCw } from 'lucide-react';
 
 const App = () => {
-  const REFRESH_INTERVAL_MS = 60000; // Increased to 60s refresh interval
+  const REFRESH_INTERVAL_MS = 60000; // Increased to 60s refresh interval for the match list
 
   const [token, setToken] = useState('');
   const [hasToken, setHasToken] = useState(false);
@@ -34,7 +34,7 @@ const App = () => {
       setEvents(data);
     } catch (err: any) {
       if (err.message.includes('429')) {
-         setError("Giới hạn tần suất của Proxy đã đạt. Vui lòng chờ 1 phút hoặc thử lại với Token API khác.");
+         setError("Giới hạn tần suất của Proxy đã đạt. Vui lòng kiểm tra cấu hình Rate Limiter của Cloudflare Worker và thử lại sau 20-40 giây.");
       } else if (err.message.includes('Lỗi mạng hoặc CORS')) {
         setError('Lỗi mạng hoặc CORS. Vui lòng kiểm tra kết nối internet, đảm bảo Cloudflare Worker của bạn đang hoạt động và đã được cấu hình CORS chính xác (Access-Control-Allow-Origin: *).');
       } else if (err.message.includes('API đã trả về phản hồi trống')) {
@@ -50,21 +50,37 @@ const App = () => {
   }, [token]);
 
 
-  // Fetch events only once when hasToken becomes true
+  // Fetch events only once when hasToken becomes true, and set up interval
   useEffect(() => {
     if (!hasToken) return;
     
     let isMounted = true;
+    // Fix: Explicitly type intervalId as number for browser environments
+    let intervalId: number | undefined;
     
-    // Initial fetch when hasToken becomes true
-    if (isMounted) {
-      fetchEventsData();
-    }
+    const startFetching = async () => {
+      if (isMounted) {
+        await fetchEventsData(); // Initial fetch
+        // Fix: Cast the return value of setInterval to number
+        intervalId = window.setInterval(() => {
+          if (isMounted) {
+            fetchEventsData(); // Subsequent fetches
+          }
+        }, REFRESH_INTERVAL_MS);
+      }
+    };
+
+    startFetching();
 
     return () => {
       isMounted = false;
+      // Ensure intervalId is cleared, check if it's defined
+      if (intervalId !== undefined) {
+        clearInterval(intervalId);
+      }
     };
-  }, [hasToken, fetchEventsData]);
+  }, [hasToken, fetchEventsData, REFRESH_INTERVAL_MS]); // Added REFRESH_INTERVAL_MS to dependencies
+
 
   const handleTokenSubmit = (e: React.FormEvent) => {
     e.preventDefault();

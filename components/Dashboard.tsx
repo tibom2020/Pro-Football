@@ -175,7 +175,9 @@ const ShotBalls = ({ shots, containerWidth }: { shots: ShotEvent[], containerWid
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) => {
-  const AUTO_REFRESH_INTERVAL_MS = 20000; // 20 seconds for individual match auto-refresh
+  // AUTO_REFRESH_INTERVAL_MS increased to 40 seconds to accommodate two sequential API calls
+  // (details + odds), each respecting a 20-second rate limit.
+  const AUTO_REFRESH_INTERVAL_MS = 40000; // 40 seconds for individual match auto-refresh
 
   const [liveMatch, setLiveMatch] = useState<MatchInfo>(match);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -372,11 +374,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
 
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
-    // Fetch all relevant data for the current match
-    const [detailsData, oddsData] = await Promise.all([
-        getMatchDetails(token, liveMatch.id),
-        getMatchOdds(token, liveMatch.id),
-    ]);
+    // Fetch match details first
+    const detailsData = await getMatchDetails(token, liveMatch.id);
     
     if (detailsData) {
         setLiveMatch(detailsData);
@@ -385,6 +384,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
             setStatsHistory(prev => ({ ...prev, [currentTime]: parseStats(detailsData.stats) }));
         }
     }
+    
+    // Then fetch odds. safeFetch will automatically wait 20s if needed after getMatchDetails.
+    const oddsData = await getMatchOdds(token, liveMatch.id);
+
     if (oddsData) {
         const overMarkets = oddsData.results?.odds?.['1_3'];
         if (overMarkets) {
@@ -410,8 +413,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
   // Main Data Fetching Effect (initial fetch and interval setup)
   useEffect(() => {
     let isMounted = true;
-    // FIX: Use `number` for intervalId as `NodeJS.Timeout` is not for browser environments.
-    let intervalId: number; 
+    // Fix: Explicitly type intervalId as number for browser environments
+    let intervalId: number | undefined; 
 
     const performFetchAndSetupInterval = async () => {
       if (isMounted) {
@@ -419,7 +422,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
         await handleRefresh();
 
         // Set up interval for automatic refresh
-        intervalId = setInterval(() => {
+        // Fix: Cast the return value of setInterval to number
+        intervalId = window.setInterval(() => {
           if (isMounted) {
             handleRefresh();
           }
@@ -431,7 +435,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
 
     return () => {
       isMounted = false;
-      clearInterval(intervalId); // Ensure intervalId is cleared
+      // Ensure intervalId is cleared, check if it's defined
+      if (intervalId !== undefined) {
+        clearInterval(intervalId); 
+      }
     };
   }, [liveMatch.id, token, handleRefresh, AUTO_REFRESH_INTERVAL_MS]);
   

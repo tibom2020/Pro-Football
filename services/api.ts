@@ -1,4 +1,3 @@
-
 import { MatchInfo, OddsData, ProcessedStats, AIPredictionResponse } from '../types';
 import { GoogleGenAI, Type } from "@google/genai";
 
@@ -84,8 +83,8 @@ const mockMatches: MatchInfo[] = [
 const mockOdds: OddsData = {
     results: {
         odds: {
-            "1_2": [],
-            "1_3": [
+            "1_2": [], // Mock for home/away odds
+            "1_3": [ // Mock for over/under odds
                 { id: '1', over_od: '1.85', under_od: '1.95', handicap: '2.5', time_str: '0', add_time: '0' }
             ]
         }
@@ -155,7 +154,8 @@ const safeFetch = async (url: string, retries = 0): Promise<any> => {
 
 export const getInPlayEvents = async (token: string): Promise<MatchInfo[]> => {
   if (token === 'DEMO_MODE') {
-    return new Promise(resolve => setTimeout(() => resolve(mockMatches), 500));
+    // Return a deep copy of mockMatches to ensure immutability and reliability in demo mode
+    return new Promise(resolve => setTimeout(() => resolve(JSON.parse(JSON.stringify(mockMatches))), 500));
   }
   if (!token) return [];
 
@@ -184,7 +184,9 @@ export const getInPlayEvents = async (token: string): Promise<MatchInfo[]> => {
 
 export const getMatchDetails = async (token: string, eventId: string): Promise<MatchInfo | null> => {
   if (token === 'DEMO_MODE') {
-    return mockMatches.find(e => e.id === eventId) || null;
+    // Also return a deep copy for a specific match in demo mode
+    const match = JSON.parse(JSON.stringify(mockMatches)).find((e: MatchInfo) => e.id === eventId) || null;
+    return new Promise(resolve => setTimeout(() => resolve(match), 200));
   }
   if (!token || !eventId) return null;
   try {
@@ -212,7 +214,8 @@ export const getMatchDetails = async (token: string, eventId: string): Promise<M
 
 export const getMatchOdds = async (token: string, eventId: string): Promise<OddsData | null> => {
   if (token === 'DEMO_MODE') {
-    return mockOdds;
+    // Return a deep copy of mockOdds for demo mode
+    return new Promise(resolve => setTimeout(() => resolve(JSON.parse(JSON.stringify(mockOdds))), 100));
   }
   if (!token || !eventId) return null;
   try {
@@ -256,8 +259,9 @@ export const parseStats = (stats: Record<string, string[]> | undefined) => {
 };
 
 // --- Gemini AI Integration ---
-// Initialize GoogleGenAI client (apiKey is injected via process.env.API_KEY)
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Initialize GoogleGenAI client
+// Fix: Use process.env.API_KEY as per Google GenAI SDK guidelines.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 
 export async function getGeminiGoalPrediction(
   matchId: string,
@@ -270,14 +274,14 @@ export async function getGeminiGoalPrediction(
   homeApi: number,
   awayApi: number,
   latestOverOdds: { handicap: string; over: number; under: number } | null,
-  // Fix: Ensure latestHomeOdds type matches what's generated in getMatchOdds (including `away`)
   latestHomeOdds: { handicap: string; home: number; away: number } | null,
   apiMomentum: number,
   shotCluster: number,
   pressure: number,
 ): Promise<AIPredictionResponse | null> {
+  // Fix: Use process.env.API_KEY for checking API key, as per Google GenAI SDK guidelines.
   if (!process.env.API_KEY) {
-    console.error("Gemini API Key is not set. Please ensure process.env.API_KEY is configured.");
+    console.error("Gemini API Key (API_KEY) is not set. Please ensure it's configured in your environment variables (e.g., .env.local for local dev, Vercel dashboard for deployment).");
     return null;
   }
 
@@ -285,7 +289,7 @@ export async function getGeminiGoalPrediction(
     if (!stats) return "N/A";
     return `
       Tấn công của đội nhà: ${stats.attacks[0]}, Tấn công của đội khách: ${stats.attacks[1]}
-      Tấn công nguy hiểm của đội nhà: ${stats.dangerous_attacks[0]}, Tấn công nguy hiểm của đội khách: ${stats.dangerous_attacks[1]}
+      Tấn công nguy hiểm của đội nhà: ${stats.dangerous_attacks[0]}, Tấn công của đội khách: ${stats.dangerous_attacks[1]}
       Sút trúng đích của đội nhà: ${stats.on_target[0]}, Sút trúng đích của đội khách: ${stats.on_target[1]}
       Sút chệch đích của đội nhà: ${stats.off_target[0]}, Sút chệch đích của đội khách: ${stats.off_target[1]}
       Phạt góc của đội nhà: ${stats.corners[0]}, Phạt góc của đội khách: ${stats.corners[1]}

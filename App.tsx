@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { MatchList } from './components/MatchList';
 import { Dashboard } from './components/Dashboard';
@@ -32,13 +33,17 @@ const App = () => {
     try {
       const data = await getInPlayEvents(token);
       setEvents(data);
+      // If demo mode is active and it returned empty, set a specific message
+      if (token === 'DEMO_MODE' && data.length === 0) {
+        setError('Chế độ Demo: Không tìm thấy trận đấu giả lập. Có thể do lỗi tải dữ liệu demo.');
+      } else if (data.length === 0 && token !== 'DEMO_MODE') {
+        setError('Không tìm thấy trận đấu trực tiếp. Vui lòng kiểm tra Token API của bạn hoặc thử lại sau.');
+      }
     } catch (err: any) {
       if (err.message.includes('429')) {
          setError("Giới hạn tần suất của Proxy đã đạt. Vui lòng kiểm tra cấu hình Rate Limiter của Cloudflare Worker và thử lại sau 20-40 giây.");
       } else if (err.message.includes('Lỗi mạng hoặc CORS')) {
         setError('Lỗi mạng hoặc CORS. Vui lòng kiểm tra kết nối internet, đảm bảo Cloudflare Worker của bạn đang hoạt động và đã được cấu hình CORS chính xác (Access-Control-Allow-Origin: *).');
-      } else if (err.message.includes('API đã trả về phản hồi trống')) {
-        setError('API đã trả về phản hồi trống hoặc không có dữ liệu. Vui lòng thử lại sau hoặc kiểm tra Token API của bạn.');
       }
       else {
         setError(err.message || 'Đã xảy ra lỗi không xác định.');

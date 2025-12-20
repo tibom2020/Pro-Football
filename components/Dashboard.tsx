@@ -1,5 +1,4 @@
 
-
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { MatchInfo, PreGoalAnalysis, OddsItem, ProcessedStats, AIPredictionResponse, OddsData } from '../types';
 import { parseStats, getMatchDetails, getMatchOdds, getGeminiGoalPrediction } from '../services/api';
@@ -180,6 +179,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
 
   const [liveMatch, setLiveMatch] = useState<MatchInfo>(match);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isAIPredicting, setIsAIPredicting] = useState(false); // New state for AI prediction loading
   const [oddsHistory, setOddsHistory] = useState<{ minute: number; over: number; under: number; handicap: string }[]>([]);
   // Fix: Update type definition for homeOddsHistory to include 'away'
   const [homeOddsHistory, setHomeOddsHistory] = useState<{ minute: number; home: number; away: number; handicap: string }[]>([]);
@@ -310,131 +310,136 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
 
   // Separate function to fetch Gemini AI prediction
   const fetchGeminiPrediction = useCallback(async () => {
+    setIsAIPredicting(true); // Start AI loading
     let currentParsedStats: ProcessedStats | undefined;
     
-    // Ensure we have the latest match details for AI prediction
-    // This is crucial as the main refresh might not have completed very recently.
-    const latestDetails = await getMatchDetails(token, liveMatch.id);
-    if (!latestDetails) {
-        console.warn("Could not get latest match details for AI prediction.");
-        setAnalysis(prev => ({ ...prev, reasoning: "Không thể lấy chi tiết trận đấu mới nhất cho phân tích AI." }));
-        return;
-    }
-
-    // Update liveMatch state for UI and get current parsed stats
-    setLiveMatch(latestDetails); 
-    currentParsedStats = parseStats(latestDetails.stats);
-    const currentTime = latestDetails.timer?.tm;
-    if (currentTime && latestDetails.stats) {
-        setStatsHistory(prev => ({ ...prev, [currentTime]: currentParsedStats }));
-    }
-
-    // Also get latest odds for AI
-    const latestOddsData = await getMatchOdds(token, liveMatch.id); 
-    if (latestOddsData) {
-      const overMarkets = latestOddsData.results?.odds?.['1_3'];
-      if (overMarkets) {
-          const newHistory = overMarkets
-              .filter(m => m.time_str && m.over_od && m.under_od && m.handicap)
-              .map(m => ({ minute: parseInt(m.time_str), over: parseFloat(m.over_od!), under: parseFloat(m.under_od!), handicap: m.handicap! }))
-              .sort((a, b) => a.minute - b.minute);
-          setOddsHistory(newHistory);
-      }
-      const homeMarkets = latestOddsData.results?.odds?.['1_2'];
-      if (homeMarkets) {
-          // Fix: Include 'away' in the mapped object for homeOddsHistory
-          const newHomeHistory = homeMarkets
-              .filter(m => m.time_str && m.home_od && m.away_od && m.handicap)
-              .map(m => ({ minute: parseInt(m.time_str), home: parseFloat(m.home_od!), away: parseFloat(m.away_od!), handicap: m.handicap! }))
-              .sort((a,b) => a.minute - b.minute);
-          setHomeOddsHistory(newHomeHistory);
-      }
-    }
-
-    // Now, prepare data for Gemini prediction
-    const currentMinute = parseInt(latestDetails?.timer?.tm?.toString() || latestDetails?.time || "0");
-    const homeScore = parseInt((latestDetails?.ss || "0-0").split("-")[0]);
-    const awayScore = parseInt((latestDetails?.ss || "0-0").split("-")[1]);
-    const homeTeamName = latestDetails?.home.name || "Home";
-    const awayTeamName = latestDetails?.away.name || "Away";
-
-    // Use the latest odds from state (which might have just been updated by getMatchOdds above)
-    const currentLatestOverOdds = oddsHistory.length > 0 ? oddsHistory[oddsHistory.length - 1] : null;
-    const currentLatestHomeOdds = homeOddsHistory.length > 0 ? homeOddsHistory[homeOddsHistory.length - 1] : null;
-
-    // Recalculate traditional factors based on the latest available data
-    const allTimes = Object.keys(statsHistory).map(Number).sort((a,b)=>a-b);
-    const getAPIMomentumAt = (minute: number, window: number) => {
-        if (!currentParsedStats) return 0;
-        const currentTotal = calculateAPIScore(currentParsedStats, 0) + calculateAPIScore(currentParsedStats, 1);
-        const pastMinute = Math.max(0, minute - window);
-        const pastTimes = allTimes.filter(t => t <= pastMinute);
-        const pastTime = pastTimes.length > 0 ? Math.max(...pastTimes) : (allTimes[0] || 0);
-        const pastStats = statsHistory[pastTime] || { attacks:[0,0], dangerous_attacks:[0,0], on_target:[0,0], off_target:[0,0], corners:[0,0], yellowcards:[0,0], redcards:[0,0] };
-        const pastTotal = calculateAPIScore(pastStats, 0) + calculateAPIScore(pastStats, 1);
-        return currentTotal - pastTotal;
-    };
-    const getShotClusterScore = (minute: number, window: number) => {
-        const minT = Math.max(0, minute - window + 1);
-        let score = 0;
-        allTimes.filter(t => t >= minT && t <= minute).forEach(t => {
-            const s = statsHistory[t];
-            if (s) score += (s.on_target[0] + s.on_target[1]) * 3.0 + (s.off_target[0] + s.off_target[1]) * 1.0;
-        });
-        return score;
-    };
-    const getBubbleIntensity = (chartData: any[], minute: number, range: number) => {
-        const minT = Math.max(0, minute - range);
-        return chartData.filter(b => b.minute >= minT && b.minute <= minute && (b.colorName==='green' || b.colorName==='yellow' || b.highlight))
-                        .reduce((acc, b) => acc + (b.highlight ? 1.6 : 1.0), 0);
-    };
-    const apiMomentum = getAPIMomentumAt(currentMinute, 5);
-    const shotCluster = getShotClusterScore(currentMinute, 5);
-    const pressure = getBubbleIntensity(marketChartData, currentMinute, 3) + getBubbleIntensity(homeMarketChartData, currentMinute, 3);
-    
-    // Calculate homeApiScore and awayApiScore from currentParsedStats directly
-    const homeApiScore = currentParsedStats ? calculateAPIScore(currentParsedStats, 0) : 0;
-    const awayApiScore = currentParsedStats ? calculateAPIScore(currentParsedStats, 1) : 0;
-
     try {
-        const aiPrediction = await getGeminiGoalPrediction(
-            liveMatch.id, // Use initial liveMatch.id as it's stable
-            currentMinute,
-            homeTeamName,
-            awayTeamName,
-            homeScore,
-            awayScore,
-            currentParsedStats,
-            homeApiScore,
-            awayApiScore,
-            currentLatestOverOdds, 
-            currentLatestHomeOdds, 
-            apiMomentum,
-            shotCluster,
-            pressure
-        );
+        // Ensure we have the latest match details for AI prediction
+        // This is crucial as the main refresh might not have completed very recently.
+        const latestDetails = await getMatchDetails(token, liveMatch.id);
+        if (!latestDetails) {
+            console.warn("Could not get latest match details for AI prediction.");
+            setAnalysis(prev => ({ ...prev, reasoning: "Không thể lấy chi tiết trận đấu mới nhất cho phân tích AI." }));
+            return;
+        }
 
-        if (aiPrediction) {
-            setAnalysis({
-                score: aiPrediction.goal_probability,
-                level: aiPrediction.confidence_level,
-                factors: { apiMomentum, shotCluster, pressure }, // Keep traditional factors visible
-                reasoning: aiPrediction.reasoning,
+        // Update liveMatch state for UI and get current parsed stats
+        setLiveMatch(latestDetails); 
+        currentParsedStats = parseStats(latestDetails.stats);
+        const currentTime = latestDetails.timer?.tm;
+        if (currentTime && latestDetails.stats) {
+            setStatsHistory(prev => ({ ...prev, [currentTime]: currentParsedStats }));
+        }
+
+        // Also get latest odds for AI
+        const latestOddsData = await getMatchOdds(token, liveMatch.id); 
+        if (latestOddsData) {
+          const overMarkets = latestOddsData.results?.odds?.['1_3'];
+          if (overMarkets) {
+              const newHistory = overMarkets
+                  .filter(m => m.time_str && m.over_od && m.under_od && m.handicap)
+                  .map(m => ({ minute: parseInt(m.time_str), over: parseFloat(m.over_od!), under: parseFloat(m.under_od!), handicap: m.handicap! }))
+                  .sort((a, b) => a.minute - b.minute);
+              setOddsHistory(newHistory);
+          }
+          const homeMarkets = latestOddsData.results?.odds?.['1_2'];
+          if (homeMarkets) {
+              // Fix: Include 'away' in the mapped object for homeOddsHistory
+              const newHomeHistory = homeMarkets
+                  .filter(m => m.time_str && m.home_od && m.away_od && m.handicap)
+                  .map(m => ({ minute: parseInt(m.time_str), home: parseFloat(m.home_od!), away: parseFloat(m.away_od!), handicap: m.handicap! }))
+                  .sort((a,b) => a.minute - b.minute);
+              setHomeOddsHistory(newHomeHistory);
+          }
+        }
+
+        // Now, prepare data for Gemini prediction
+        const currentMinute = parseInt(latestDetails?.timer?.tm?.toString() || latestDetails?.time || "0");
+        const homeScore = parseInt((latestDetails?.ss || "0-0").split("-")[0]);
+        const awayScore = parseInt((latestDetails?.ss || "0-0").split("-")[1]);
+        const homeTeamName = latestDetails?.home.name || "Home";
+        const awayTeamName = latestDetails?.away.name || "Away";
+
+        // Use the latest odds from state (which might have just been updated by getMatchOdds above)
+        const currentLatestOverOdds = oddsHistory.length > 0 ? oddsHistory[oddsHistory.length - 1] : null;
+        const currentLatestHomeOdds = homeOddsHistory.length > 0 ? homeOddsHistory[homeOddsHistory.length - 1] : null;
+
+        // Recalculate traditional factors based on the latest available data
+        const allTimes = Object.keys(statsHistory).map(Number).sort((a,b)=>a-b);
+        const getAPIMomentumAt = (minute: number, window: number) => {
+            if (!currentParsedStats) return 0;
+            const currentTotal = calculateAPIScore(currentParsedStats, 0) + calculateAPIScore(currentParsedStats, 1);
+            const pastMinute = Math.max(0, minute - window);
+            const pastTimes = allTimes.filter(t => t <= pastMinute);
+            const pastTime = pastTimes.length > 0 ? Math.max(...pastTimes) : (allTimes[0] || 0);
+            const pastStats = statsHistory[pastTime] || { attacks:[0,0], dangerous_attacks:[0,0], on_target:[0,0], off_target:[0,0], corners:[0,0], yellowcards:[0,0], redcards:[0,0] };
+            const pastTotal = calculateAPIScore(pastStats, 0) + calculateAPIScore(pastStats, 1);
+            return currentTotal - pastTotal;
+        };
+        const getShotClusterScore = (minute: number, window: number) => {
+            const minT = Math.max(0, minute - window + 1);
+            let score = 0;
+            allTimes.filter(t => t >= minT && t <= minute).forEach(t => {
+                const s = statsHistory[t];
+                if (s) score += (s.on_target[0] + s.on_target[1]) * 3.0 + (s.off_target[0] + s.off_target[1]) * 1.0;
             });
-            runPatternDetection(aiPrediction.goal_probability, aiPrediction.confidence_level); // Update highlights based on AI
-        } else {
-            console.warn("Gemini AI prediction failed, analysis not updated.");
+            return score;
+        };
+        const getBubbleIntensity = (chartData: any[], minute: number, range: number) => {
+            const minT = Math.max(0, minute - range);
+            return chartData.filter(b => b.minute >= minT && b.minute <= minute && (b.colorName==='green' || b.colorName==='yellow' || b.highlight))
+                            .reduce((acc, b) => acc + (b.highlight ? 1.6 : 1.0), 0);
+        };
+        const apiMomentum = getAPIMomentumAt(currentMinute, 5);
+        const shotCluster = getShotClusterScore(currentMinute, 5);
+        const pressure = getBubbleIntensity(marketChartData, currentMinute, 3) + getBubbleIntensity(homeMarketChartData, currentMinute, 3);
+        
+        // Calculate homeApiScore and awayApiScore from currentParsedStats directly
+        const homeApiScore = currentParsedStats ? calculateAPIScore(currentParsedStats, 0) : 0;
+        const awayApiScore = currentParsedStats ? calculateAPIScore(currentParsedStats, 1) : 0;
+
+        try {
+            const aiPrediction = await getGeminiGoalPrediction(
+                liveMatch.id, // Use initial liveMatch.id as it's stable
+                currentMinute,
+                homeTeamName,
+                awayTeamName,
+                homeScore,
+                awayScore,
+                currentParsedStats,
+                homeApiScore,
+                awayApiScore,
+                currentLatestOverOdds, 
+                currentLatestHomeOdds, 
+                apiMomentum,
+                shotCluster,
+                pressure
+            );
+
+            if (aiPrediction) {
+                setAnalysis({
+                    score: aiPrediction.goal_probability,
+                    level: aiPrediction.confidence_level,
+                    factors: { apiMomentum, shotCluster, pressure }, // Keep traditional factors visible
+                    reasoning: aiPrediction.reasoning,
+                });
+                runPatternDetection(aiPrediction.goal_probability, aiPrediction.confidence_level); // Update highlights based on AI
+            } else {
+                console.warn("Gemini AI prediction failed, analysis not updated.");
+                setAnalysis(prev => ({
+                    ...prev,
+                    reasoning: prev.reasoning || "Phân tích AI không khả dụng.",
+                }));
+            }
+        } catch (error) {
+            console.error("Error fetching Gemini prediction:", error);
             setAnalysis(prev => ({
                 ...prev,
-                reasoning: prev.reasoning || "Phân tích AI không khả dụng.",
+                reasoning: `Lỗi khi gọi AI: ${error instanceof Error ? error.message : String(error)}.`,
             }));
         }
-    } catch (error) {
-        console.error("Error fetching Gemini prediction:", error);
-        setAnalysis(prev => ({
-            ...prev,
-            reasoning: `Lỗi khi gọi AI: ${error instanceof Error ? error.message : String(error)}.`,
-        }));
+    } finally {
+        setIsAIPredicting(false); // End AI loading
     }
   }, [token, liveMatch.id, liveMatch.timer, liveMatch.time, liveMatch.home.name, liveMatch.away.name, liveMatch.ss, oddsHistory, homeOddsHistory, statsHistory, marketChartData, homeMarketChartData, runPatternDetection]);
 
@@ -514,36 +519,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
     };
   }, [liveMatch.id, token, handleRefresh, AUTO_REFRESH_INTERVAL_MS]);
 
-  // NEW Effect for Gemini AI Prediction Polling (every 10 minutes)
-  useEffect(() => {
-      if (!token || !liveMatch.id) {
-          console.log("Skipping AI prediction polling setup: token or liveMatch.id missing.");
-          return;
-      }
+  // Removed: NEW Effect for Gemini AI Prediction Polling (every 10 minutes)
+  // useEffect(() => {
+  //     if (!token || !liveMatch.id) {
+  //         console.log("Skipping AI prediction polling setup: token or liveMatch.id missing.");
+  //         return;
+  //     }
 
-      let isMounted = true;
-      let aiIntervalId: number | undefined;
+  //     let isMounted = true;
+  //     let aiIntervalId: number | undefined;
 
-      const startAIPredictionPolling = async () => {
-          if (isMounted) {
-              await fetchGeminiPrediction(); // Initial AI prediction fetch
-              aiIntervalId = window.setInterval(() => {
-                  if (isMounted) {
-                      fetchGeminiPrediction();
-                  }
-              }, AI_PREDICTION_INTERVAL_MS);
-          }
-      };
+  //     const startAIPredictionPolling = async () => {
+  //         if (isMounted) {
+  //             await fetchGeminiPrediction(); // Initial AI prediction fetch
+  //             aiIntervalId = window.setInterval(() => {
+  //                 if (isMounted) {
+  //                     fetchGeminiPrediction();
+  //                 }
+  //             }, AI_PREDICTION_INTERVAL_MS);
+  //         }
+  //     };
 
-      startAIPredictionPolling();
+  //     startAIPredictionPolling();
 
-      return () => {
-          isMounted = false;
-          if (aiIntervalId !== undefined) {
-              clearInterval(aiIntervalId);
-          }
-      };
-  }, [token, liveMatch.id, fetchGeminiPrediction, AI_PREDICTION_INTERVAL_MS]); 
+  //     return () => {
+  //         isMounted = false;
+  //         if (aiIntervalId !== undefined) {
+  //             clearInterval(aiIntervalId);
+  //         }
+  //     };
+  // }, [token, liveMatch.id, fetchGeminiPrediction, AI_PREDICTION_INTERVAL_MS]); 
   
   // Effect to update shot events from stats history
   useEffect(() => {
@@ -588,9 +593,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
                 {liveMatch.timer?.tm || liveMatch.time}'
              </span>
           </div>
-          <button onClick={handleRefresh} disabled={isRefreshing} className="p-2 -mr-2 text-gray-600 active:bg-gray-100 rounded-full">
-            <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
-          </button>
+          <div className="flex items-center space-x-2">
+            <button 
+              onClick={fetchGeminiPrediction} 
+              disabled={isAIPredicting} 
+              className="p-2 -mr-2 bg-blue-500 hover:bg-blue-600 text-white rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Phân tích AI"
+            >
+              {isAIPredicting ? <RefreshCw className="w-5 h-5 animate-spin" /> : <TrendingUp className="w-5 h-5" />}
+            </button>
+            <button onClick={handleRefresh} disabled={isRefreshing} className="p-2 -mr-2 text-gray-600 active:bg-gray-100 rounded-full">
+              <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
         </div>
         <div className="flex justify-between items-center px-6 pb-4">
             <div className="flex flex-col items-center w-1/3">

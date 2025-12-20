@@ -17,7 +17,8 @@ const B365_API_INPLAY = "https://api.b365api.com/v3/events/inplay";
 const B365_API_ODDS = "https://api.b365api.com/v2/event/odds";
 
 // --- Rate Limiting Configuration ---
-const REQUEST_LIMIT_PER_MINUTE = 60; // 60 requests per minute
+// Updated: 1 request per 20 seconds (which is 3 requests per minute)
+const REQUEST_LIMIT_PER_MINUTE = 3; 
 const WINDOW_SIZE_MS = 60 * 1000;    // 60 seconds
 const requestTimestamps: number[] = []; // Store timestamps of recent requests
 
@@ -36,9 +37,10 @@ const enforceRateLimit = async () => {
     // If we have reached the limit within the window, wait
     if (requestTimestamps.length >= REQUEST_LIMIT_PER_MINUTE) {
         const oldestRequestTime = requestTimestamps[0];
+        // Calculate wait time: (time when the oldest request exits the window) - now
         const waitTime = (oldestRequestTime + WINDOW_SIZE_MS) - now;
         if (waitTime > 0) {
-            console.warn(`Đạt giới hạn tần suất API (60/phút). Đang chờ ${waitTime}ms...`);
+            console.warn(`Đạt giới hạn tần suất API phía Client (${REQUEST_LIMIT_PER_MINUTE}/phút). Đang chờ ${waitTime}ms...`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
         }
         // After waiting, re-check and clean up any newly old timestamps

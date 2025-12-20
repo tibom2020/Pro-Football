@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { MatchList } from './components/MatchList';
 import { Dashboard } from './components/Dashboard';
@@ -45,7 +44,7 @@ const App = () => {
           if (err.message.includes('429')) {
              setError("Giới hạn tần suất của Proxy đã đạt. Vui lòng chờ 1 phút hoặc thử lại với Token API khác.");
           } else if (err.message.includes('Lỗi mạng hoặc CORS')) {
-            setError('Lỗi mạng hoặc CORS. Vui lòng kiểm tra kết nối internet của bạn.');
+            setError('Lỗi mạng hoặc CORS. Vui lòng kiểm tra kết nối internet, đảm bảo Cloudflare Worker của bạn đang hoạt động và đã được cấu hình CORS chính xác (Access-Control-Allow-Origin: *).');
           } else if (err.message.includes('API đã trả về phản hồi trống')) {
             setError('API đã trả về phản hồi trống hoặc không có dữ liệu. Vui lòng thử lại sau hoặc kiểm tra Token API của bạn.');
           }

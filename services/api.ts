@@ -4,12 +4,54 @@ import { MatchInfo, OddsData } from '../types';
 /**
  * PROXY STRATEGY:
  * B365 API often blocks common public proxies like allorigins or corsproxy.io.
- * codetabs.com is a reliable alternative that frequently bypasses these filters.
+ * For personal projects, a private proxy like a Cloudflare Worker is recommended
+ * for better reliability and rate limit control.
+ *
+ * REPLACE THE URL BELOW WITH YOUR OWN CLOUDFLARE WORKER URL.
+ * Example: "https://YOUR_WORKER_NAME.YOUR_SUBDOMAIN.workers.dev/"
+ * Make sure your Worker is configured to forward the 'target' query parameter.
  */
-const PROXY_URL = "https://api.codetabs.com/v1/proxy?quest=";
+const PROXY_URL = "https://long-tooth-f7a5.phanvietlinh-0b1.workers.dev/"; 
 
 const B365_API_INPLAY = "https://api.b365api.com/v3/events/inplay";
 const B365_API_ODDS = "https://api.b365api.com/v2/event/odds";
+
+// --- Rate Limiting Configuration ---
+const REQUEST_LIMIT_PER_MINUTE = 60; // 60 requests per minute
+const WINDOW_SIZE_MS = 60 * 1000;    // 60 seconds
+const requestTimestamps: number[] = []; // Store timestamps of recent requests
+
+/**
+ * Ensures that API requests adhere to the client-side rate limit.
+ * Will pause execution if the limit would be exceeded within the rolling window.
+ */
+const enforceRateLimit = async () => {
+    const now = Date.now();
+
+    // Remove timestamps older than the window size
+    while (requestTimestamps.length > 0 && requestTimestamps[0] < now - WINDOW_SIZE_MS) {
+        requestTimestamps.shift();
+    }
+
+    // If we have reached the limit within the window, wait
+    if (requestTimestamps.length >= REQUEST_LIMIT_PER_MINUTE) {
+        const oldestRequestTime = requestTimestamps[0];
+        const waitTime = (oldestRequestTime + WINDOW_SIZE_MS) - now;
+        if (waitTime > 0) {
+            console.warn(`Đạt giới hạn tần suất API (60/phút). Đang chờ ${waitTime}ms...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+        // After waiting, re-check and clean up any newly old timestamps
+        // This handles cases where multiple waits might have occurred
+        while (requestTimestamps.length > 0 && requestTimestamps[0] < Date.now() - WINDOW_SIZE_MS) {
+            requestTimestamps.shift();
+        }
+    }
+    
+    // Add current request's timestamp
+    requestTimestamps.push(Date.now());
+};
+
 
 const mockMatches: MatchInfo[] = [
   {
@@ -68,7 +110,12 @@ const safeFetch = async (url: string, retries = 0): Promise<any> => {
     const MAX_RETRIES = 3;
     const INITIAL_RETRY_DELAY_MS = 2000; // 2 seconds
 
-    const proxiedUrl = `${PROXY_URL}${encodeURIComponent(url)}`;
+    // Apply client-side rate limit before attempting fetch
+    await enforceRateLimit();
+
+    // Construct the proxied URL for your Cloudflare Worker
+    // The worker expects the original B365 URL as a 'target' query parameter
+    const proxiedUrl = `${PROXY_URL}?target=${encodeURIComponent(url)}`;
     
     try {
         const response = await fetch(proxiedUrl);

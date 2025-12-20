@@ -1,3 +1,4 @@
+
 import { MatchInfo, OddsData, ProcessedStats, AIPredictionResponse } from '../types';
 import { GoogleGenAI, Type } from "@google/genai";
 
@@ -18,8 +19,8 @@ const B365_API_INPLAY = "https://api.b365api.com/v3/events/inplay";
 const B365_API_ODDS = "https://api.b365api.com/v2/event/odds";
 
 // --- Client-side Rate Limiting Configuration ---
-// Enforce a strict minimum 20-second interval between ANY two API calls
-const MIN_API_CALL_INTERVAL = 20 * 1000; // 20 seconds
+// Enforce a strict minimum 22-second interval between ANY two API calls to buffer proxy's 20s limit.
+const MIN_API_CALL_INTERVAL = 22 * 1000; // 22 seconds
 let lastApiCallTime = 0; // Timestamp of the last API call initiated
 
 /**
@@ -260,7 +261,7 @@ export const parseStats = (stats: Record<string, string[]> | undefined) => {
 
 // --- Gemini AI Integration ---
 // Initialize GoogleGenAI client
-// Fix: Use process.env.API_KEY as per Google GenAI SDK guidelines.
+// Uses process.env.API_KEY which will be defined via vite.config.ts for client-side access.
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 
 export async function getGeminiGoalPrediction(
@@ -279,9 +280,9 @@ export async function getGeminiGoalPrediction(
   shotCluster: number,
   pressure: number,
 ): Promise<AIPredictionResponse | null> {
-  // Fix: Use process.env.API_KEY for checking API key, as per Google GenAI SDK guidelines.
+  // Check for the API key. It's expected to be injected via vite.config.ts if running in browser.
   if (!process.env.API_KEY) {
-    console.error("Gemini API Key (API_KEY) is not set. Please ensure it's configured in your environment variables (e.g., .env.local for local dev, Vercel dashboard for deployment).");
+    console.error("Gemini API Key (API_KEY) is not set. Please ensure it's configured in your environment variables (e.g., .env for local dev, Vercel dashboard for deployment) and that vite.config.ts defines it.");
     return null;
   }
 

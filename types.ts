@@ -1,4 +1,5 @@
 
+
 export interface MatchInfo {
   id: string;
   league: { name: string };
@@ -50,10 +51,20 @@ export interface ChartPoint {
 
 export interface PreGoalAnalysis {
   score: number;
-  level: 'low' | 'medium' | 'high' | 'very-high';
+  // Fix: Update level type to match AI's Vietnamese output
+  level: 'thấp' | 'trung bình' | 'cao' | 'rất cao';
   factors: {
     apiMomentum: number;
     shotCluster: number;
     pressure: number;
   };
+  reasoning?: string; // Added for AI explanation
+}
+
+// New interface for AI prediction response
+export interface AIPredictionResponse {
+  goal_probability: number; // 0-100
+  // Fix: Update confidence_level type to match AI's Vietnamese output
+  confidence_level: 'thấp' | 'trung bình' | 'cao' | 'rất cao';
+  reasoning?: string; // Optional explanation from AI
 }

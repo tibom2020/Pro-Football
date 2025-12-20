@@ -1,5 +1,6 @@
 
-import { MatchInfo, OddsData } from '../types';
+import { MatchInfo, OddsData, ProcessedStats, AIPredictionResponse } from '../types';
+import { GoogleGenAI, Type } from "@google/genai";
 
 /**
  * PROXY STRATEGY:
@@ -253,3 +254,134 @@ export const parseStats = (stats: Record<string, string[]> | undefined) => {
     redcards: parse('redcards'),
   };
 };
+
+// --- Gemini AI Integration ---
+// Initialize GoogleGenAI client (apiKey is injected via process.env.API_KEY)
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+export async function getGeminiGoalPrediction(
+  matchId: string,
+  currentMinute: number,
+  homeTeamName: string,
+  awayTeamName: string,
+  homeScore: number,
+  awayScore: number,
+  currentStats: ProcessedStats | undefined,
+  homeApi: number,
+  awayApi: number,
+  latestOverOdds: { handicap: string; over: number; under: number } | null,
+  // Fix: Ensure latestHomeOdds type matches what's generated in getMatchOdds (including `away`)
+  latestHomeOdds: { handicap: string; home: number; away: number } | null,
+  apiMomentum: number,
+  shotCluster: number,
+  pressure: number,
+): Promise<AIPredictionResponse | null> {
+  if (!process.env.API_KEY) {
+    console.error("Gemini API Key is not set. Please ensure process.env.API_KEY is configured.");
+    return null;
+  }
+
+  const generateStatsText = (stats: ProcessedStats | undefined) => {
+    if (!stats) return "N/A";
+    return `
+      Tấn công của đội nhà: ${stats.attacks[0]}, Tấn công của đội khách: ${stats.attacks[1]}
+      Tấn công nguy hiểm của đội nhà: ${stats.dangerous_attacks[0]}, Tấn công nguy hiểm của đội khách: ${stats.dangerous_attacks[1]}
+      Sút trúng đích của đội nhà: ${stats.on_target[0]}, Sút trúng đích của đội khách: ${stats.on_target[1]}
+      Sút chệch đích của đội nhà: ${stats.off_target[0]}, Sút chệch đích của đội khách: ${stats.off_target[1]}
+      Phạt góc của đội nhà: ${stats.corners[0]}, Phạt góc của đội khách: ${stats.corners[1]}
+      Thẻ vàng của đội nhà: ${stats.yellowcards[0]}, Thẻ vàng của đội khách: ${stats.yellowcards[1]}
+      Thẻ đỏ của đội nhà: ${stats.redcards[0]}, Thẻ đỏ của đội khách: ${stats.redcards[1]}
+    `;
+  };
+
+  const generateOddsText = (
+    overOdds: { handicap: string; over: number; under: number } | null,
+    homeOdds: { handicap: string; home: number; away: number } | null,
+  ) => {
+    let oddsText = "";
+    if (overOdds) {
+      oddsText += `Tỷ lệ Kèo Tài/Xỉu (Handicap): ${overOdds.handicap} (Kèo Tài: ${overOdds.over}, Kèo Xỉu: ${overOdds.under})\n`;
+    }
+    if (homeOdds) {
+      oddsText += `Tỷ lệ Kèo Châu Á (Handicap): ${homeOdds.handicap} (Kèo Đội nhà: ${homeOdds.home}, Kèo Đội khách: ${homeOdds.away})\n`;
+    }
+    return oddsText || "Không có tỷ lệ cược mới nhất.";
+  };
+
+  const promptContent = `
+    Bạn là một chuyên gia phân tích trận đấu bóng đá với kiến thức sâu sắc về động lực trận đấu và thị trường cá cược.
+    Dựa trên các số liệu thống kê trận đấu thời gian thực, tỷ số hiện tại, tỷ lệ cược và các yếu tố phân tích truyền thống sau đây,
+    hãy dự đoán xác suất có bàn thắng được ghi trong *5 phút tiếp theo* của trận đấu.
+    Cung cấp dự đoán của bạn dưới dạng phần trăm (0-100), mức độ tin cậy và một lý do ngắn gọn.
+    Tất cả các phần trong phản hồi (bao gồm lý do và mức độ tin cậy) phải bằng tiếng Việt.
+
+    ID trận đấu: ${matchId}
+    Phút hiện tại: ${currentMinute}
+    Tỷ số: ${homeScore}-${awayScore}
+    Đội nhà: ${homeTeamName}, Đội khách: ${awayTeamName}
+
+    --- Thống kê trực tiếp ---
+    ${generateStatsText(currentStats)}
+    Điểm API đội nhà: ${homeApi.toFixed(1)}, Điểm API đội khách: ${awayApi.toFixed(1)}
+
+    --- Tỷ lệ cược mới nhất ---
+    ${generateOddsText(latestOverOdds, latestHomeOdds)}
+
+    --- Các yếu tố phân tích truyền thống ---
+    Động lực API (5 phút gần nhất): ${apiMomentum.toFixed(1)}
+    Cụm sút (tổng số cú sút 5 phút gần nhất): ${shotCluster.toFixed(1)}
+    Áp lực (từ biến động tỷ lệ cược): ${pressure.toFixed(1)}
+
+    --- Định dạng đầu ra ---
+    Xuất dự đoán của bạn TUYỆT ĐỐI theo định dạng JSON, tuân thủ schema sau. KHÔNG bao gồm bất kỳ văn bản nào khác trước hoặc sau JSON.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview", // Use gemini-3-flash-preview
+      contents: [{ parts: [{ text: promptContent }] }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            goal_probability: {
+              type: Type.INTEGER,
+              description: 'Xác suất bàn thắng được ghi trong 5 phút tiếp theo, dưới dạng phần trăm (0-100).'
+            },
+            confidence_level: {
+              type: Type.STRING,
+              description: 'Mức độ tin cậy của dự đoán (thấp, trung bình, cao, rất cao).',
+              enum: ['thấp', 'trung bình', 'cao', 'rất cao'] // Vietnamese enum
+            },
+            reasoning: {
+              type: Type.STRING,
+              description: 'Một giải thích ngắn gọn, súc tích cho dự đoán này (bằng tiếng Việt).'
+            }
+          },
+          required: ['goal_probability', 'confidence_level'],
+          propertyOrdering: ['goal_probability', 'confidence_level', 'reasoning']
+        },
+        temperature: 0.5, // Lower temperature for more deterministic output
+        topK: 40,
+        topP: 0.95,
+      },
+    });
+
+    const jsonStr = response.text.trim();
+    if (jsonStr) {
+      try {
+        const parsedResponse: AIPredictionResponse = JSON.parse(jsonStr);
+        return parsedResponse;
+      } catch (jsonError) {
+        console.error("Failed to parse Gemini JSON response:", jsonError, "Raw response:", jsonStr);
+        return null;
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error("Gemini API call failed:", error);
+    // You might want to throw a more specific error or handle it in Dashboard.tsx
+    return null;
+  }
+}

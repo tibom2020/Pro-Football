@@ -1,4 +1,5 @@
 
+
 import React, { useMemo } from 'react';
 import { MatchInfo, ProcessedStats } from '../types';
 
@@ -34,14 +35,14 @@ export const LiveStatsTable: React.FC<LiveStatsTableProps> = ({
 
   return (
     <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 mt-4">
-      <h3 className="text-sm font-bold text-gray-700 mb-3">Live Statistics</h3>
+      <h3 className="text-sm font-bold text-gray-700 mb-3">Thống kê trực tiếp</h3>
       <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        <StatItem label="HDP Home" value={latestHomeOdds?.handicap ? parseFloat(latestHomeOdds.handicap).toFixed(2) : '-'} />
-        <StatItem label="HDP" value={latestOdds?.handicap ? parseFloat(latestOdds.handicap).toFixed(2) : '-'} />
-        <StatItem label="Home Odds" value={latestHomeOdds?.home ? latestHomeOdds.home.toFixed(3) : '-'} />
-        <StatItem label="Over Odds" value={latestOdds?.over ? latestOdds.over.toFixed(3) : '-'} />
-        <StatItem label="Home API" value={latestApiScores?.homeApi ? latestApiScores.homeApi.toFixed(1) : '-'} color="text-blue-600" />
-        <StatItem label="Away API" value={latestApiScores?.awayApi ? latestApiScores.awayApi.toFixed(1) : '-'} color="text-orange-600" />
+        <StatItem label="HDP Đội nhà" value={latestHomeOdds?.handicap ? parseFloat(latestHomeOdds.handicap).toFixed(2) : '-'} />
+        <StatItem label="HDP Tài/Xỉu" value={latestOdds?.handicap ? parseFloat(latestOdds.handicap).toFixed(2) : '-'} />
+        <StatItem label="Tỷ lệ Đội nhà" value={latestHomeOdds?.home ? latestHomeOdds.home.toFixed(3) : '-'} />
+        <StatItem label="Tỷ lệ Tài" value={latestOdds?.over ? latestOdds.over.toFixed(3) : '-'} />
+        <StatItem label="API Đội nhà" value={latestApiScores?.homeApi ? latestApiScores.homeApi.toFixed(1) : '-'} color="text-blue-600" />
+        <StatItem label="API Đội khách" value={latestApiScores?.awayApi ? latestApiScores.awayApi.toFixed(1) : '-'} color="text-orange-600" />
       </div>
     </div>
   );

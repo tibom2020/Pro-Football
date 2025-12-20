@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { MatchList } from './components/MatchList';
 import { Dashboard } from './components/Dashboard';
@@ -43,7 +42,8 @@ const App = () => {
       if (err.message.includes('429')) {
          setError("Giới hạn tần suất của Proxy đã đạt. Vui lòng kiểm tra cấu hình Rate Limiter của Cloudflare Worker và thử lại sau 20-40 giây.");
       } else if (err.message.includes('Lỗi mạng hoặc CORS')) {
-        setError('Lỗi mạng hoặc CORS. Vui lòng kiểm tra kết nối internet, đảm bảo Cloudflare Worker của bạn đang hoạt động và đã được cấu hình CORS chính xác (Access-Control-Allow-Origin: *).');
+        // Display the full detailed message from services/api.ts
+        setError(err.message); 
       }
       else {
         setError(err.message || 'Đã xảy ra lỗi không xác định.');
@@ -176,6 +176,7 @@ const App = () => {
         {error && (
             <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4 rounded-md" role="alert">
                 <p className="font-bold">Lỗi</p>
+                {/* Render the error message directly */}
                 <p>{error}</p>
                 <p className="mt-2 text-xs text-red-600">
                   Vui lòng kiểm tra Token API của bạn hoặc thử lại sau vài phút nếu đây là lỗi giới hạn tần suất.

@@ -19,8 +19,8 @@ const B365_API_INPLAY = "https://api.b365api.com/v3/events/inplay";
 const B365_API_ODDS = "https://api.b365api.com/v2/event/odds";
 
 // --- Client-side Rate Limiting Configuration ---
-// Enforce a strict minimum 22-second interval between ANY two API calls to buffer proxy's 20s limit.
-const MIN_API_CALL_INTERVAL = 22 * 1000; // 22 seconds
+// Enforce a strict minimum 30-second interval between ANY two API calls to provide a robust buffer against proxy's 20s limit.
+const MIN_API_CALL_INTERVAL = 30 * 1000; // 30 seconds
 let lastApiCallTime = 0; // Timestamp of the last API call initiated
 
 /**

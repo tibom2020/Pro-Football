@@ -1,10 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { MatchList } from './components/MatchList';
 import { Dashboard } from './components/Dashboard';
 import { MatchInfo } from './types';
 import { getInPlayEvents, getMatchDetails } from './services/api';
-import { KeyRound, ShieldCheck } from 'lucide-react';
+import { KeyRound, ShieldCheck, RefreshCw } from 'lucide-react';
 
 const App = () => {
   const REFRESH_INTERVAL_MS = 60000; // Increased to 60s refresh interval
@@ -25,49 +25,46 @@ const App = () => {
     }
   }, []);
 
-  // Fetch events loop
+  // Callable function to fetch events
+  const fetchEventsData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getInPlayEvents(token);
+      setEvents(data);
+    } catch (err: any) {
+      if (err.message.includes('429')) {
+         setError("Giới hạn tần suất của Proxy đã đạt. Vui lòng chờ 1 phút hoặc thử lại với Token API khác.");
+      } else if (err.message.includes('Lỗi mạng hoặc CORS')) {
+        setError('Lỗi mạng hoặc CORS. Vui lòng kiểm tra kết nối internet, đảm bảo Cloudflare Worker của bạn đang hoạt động và đã được cấu hình CORS chính xác (Access-Control-Allow-Origin: *).');
+      } else if (err.message.includes('API đã trả về phản hồi trống')) {
+        setError('API đã trả về phản hồi trống hoặc không có dữ liệu. Vui lòng thử lại sau hoặc kiểm tra Token API của bạn.');
+      }
+      else {
+        setError(err.message || 'Đã xảy ra lỗi không xác định.');
+      }
+      setEvents([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+
+  // Fetch events only once when hasToken becomes true
   useEffect(() => {
     if (!hasToken) return;
     
     let isMounted = true;
-    const fetchEvents = async () => {
-      if (!isMounted) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await getInPlayEvents(token);
-        if (isMounted) {
-          setEvents(data);
-        }
-      } catch (err: any) {
-        if (isMounted) {
-          if (err.message.includes('429')) {
-             setError("Giới hạn tần suất của Proxy đã đạt. Vui lòng chờ 1 phút hoặc thử lại với Token API khác.");
-          } else if (err.message.includes('Lỗi mạng hoặc CORS')) {
-            setError('Lỗi mạng hoặc CORS. Vui lòng kiểm tra kết nối internet, đảm bảo Cloudflare Worker của bạn đang hoạt động và đã được cấu hình CORS chính xác (Access-Control-Allow-Origin: *).');
-          } else if (err.message.includes('API đã trả về phản hồi trống')) {
-            setError('API đã trả về phản hồi trống hoặc không có dữ liệu. Vui lòng thử lại sau hoặc kiểm tra Token API của bạn.');
-          }
-          else {
-            setError(err.message || 'Đã xảy ra lỗi không xác định.');
-          }
-          setEvents([]);
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    fetchEvents();
-    const interval = setInterval(fetchEvents, REFRESH_INTERVAL_MS);
     
+    // Initial fetch when hasToken becomes true
+    if (isMounted) {
+      fetchEventsData();
+    }
+
     return () => {
       isMounted = false;
-      clearInterval(interval);
     };
-  }, [hasToken, token]);
+  }, [hasToken, fetchEventsData]);
 
   const handleTokenSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,6 +80,7 @@ const App = () => {
     if (matchFromList) setCurrentMatch(matchFromList);
     
     // Fetch full details (if needed separately)
+    // Note: getMatchDetails also uses the rate limit, so this won't spam the API
     const details = await getMatchDetails(token, id);
     if (details) setCurrentMatch(details);
   };
@@ -145,7 +143,12 @@ const App = () => {
     <div className="min-h-screen bg-gray-50 max-w-md mx-auto shadow-2xl overflow-hidden">
       <div className="bg-white px-5 py-4 sticky top-0 z-10 border-b border-gray-100 flex justify-between items-center">
         <h1 className="text-xl font-black text-slate-800 tracking-tight">Live Matches</h1>
-        <button onClick={handleLogout} className="text-xs text-red-500 font-medium">Logout</button>
+        <div className="flex items-center space-x-3">
+            <button onClick={fetchEventsData} disabled={loading} className="p-2 -mr-2 text-gray-600 hover:bg-gray-100 rounded-full disabled:opacity-50 disabled:cursor-not-allowed">
+              <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <button onClick={handleLogout} className="text-xs text-red-500 font-medium">Logout</button>
+        </div>
       </div>
       
       <div className="p-4">

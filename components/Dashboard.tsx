@@ -175,7 +175,7 @@ const ShotBalls = ({ shots, containerWidth }: { shots: ShotEvent[], containerWid
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) => {
-  const REFRESH_INTERVAL_MS = 120000; // Increased to 120s (2 minutes) refresh for live odds and stats
+  // const REFRESH_INTERVAL_MS = 120000; // Removed automatic refresh for individual match
 
   const [liveMatch, setLiveMatch] = useState<MatchInfo>(match);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -277,9 +277,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
     return finalData;
   }, [homeOddsHistory]);
 
-  const runPatternDetection = useCallback(() => {
-    const currentMinute = parseInt(liveMatch.timer?.tm?.toString() || liveMatch.time || "0");
+  const runPatternDetection = useCallback(async () => { // Made async to await data
+    // Ensure we have the latest match details for pattern detection
+    const latestDetails = await getMatchDetails(token, liveMatch.id);
+    if (!latestDetails) return;
+    setLiveMatch(latestDetails); // Update liveMatch with the very latest details before calculation
+    const currentMinute = parseInt(latestDetails.timer?.tm?.toString() || latestDetails.time || "0");
     if (!currentMinute || currentMinute < 10) return;
+
+    // Update statsHistory with the latest data
+    if (currentMinute && latestDetails.stats) {
+      setStatsHistory(prev => ({ ...prev, [currentMinute]: parseStats(latestDetails.stats) }));
+    }
 
     const normalize = (val: number, maxVal: number) => Math.max(0, Math.min(1, val / (maxVal || 1)));
     const allTimes = Object.keys(statsHistory).map(Number).sort((a,b)=>a-b);
@@ -358,9 +367,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
             return prev;
         });
     }
-  }, [liveMatch.timer, liveMatch.time, statsHistory, marketChartData, homeMarketChartData]);
+  }, [liveMatch.id, token, statsHistory, marketChartData, homeMarketChartData]); // Added token and liveMatch.id as dependencies
 
-  // Main Data Fetching Effect
+  // Main Data Fetching Effect (modified to run once on mount)
   useEffect(() => {
     let isMounted = true;
     const fetchData = async () => {
@@ -403,9 +412,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
       }
     };
 
-    fetchData();
-    const interval = setInterval(fetchData, REFRESH_INTERVAL_MS);
-    return () => { isMounted = false; clearInterval(interval); };
+    fetchData(); // Initial fetch when component mounts
+    // Removed setInterval for automatic refresh
+    return () => { isMounted = false; /* No clearInterval needed */ };
   }, [liveMatch.id, token, runPatternDetection]);
   
   // Effect to update shot events from stats history
@@ -431,10 +440,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ token, match, onBack }) =>
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    const details = await getMatchDetails(token, liveMatch.id);
-    if (details) {
-      setLiveMatch(details);
+    // Fetch all relevant data for the current match
+    const [detailsData, oddsData] = await Promise.all([
+        getMatchDetails(token, liveMatch.id),
+        getMatchOdds(token, liveMatch.id),
+    ]);
+    
+    if (detailsData) {
+        setLiveMatch(detailsData);
+        const currentTime = detailsData.timer?.tm;
+        if (currentTime && detailsData.stats) {
+            setStatsHistory(prev => ({ ...prev, [currentTime]: parseStats(detailsData.stats) }));
+        }
     }
+    if (oddsData) {
+        const overMarkets = oddsData.results?.odds?.['1_3'];
+        if (overMarkets) {
+            const newHistory = overMarkets
+                .filter(m => m.time_str && m.over_od && m.under_od && m.handicap)
+                .map(m => ({ minute: parseInt(m.time_str), over: parseFloat(m.over_od!), under: parseFloat(m.under_od!), handicap: m.handicap! }))
+                .sort((a, b) => a.minute - b.minute);
+            setOddsHistory(newHistory);
+        }
+        const homeMarkets = oddsData.results?.odds?.['1_2'];
+        if (homeMarkets) {
+            const newHomeHistory = homeMarkets
+                .filter(m => m.time_str && m.home_od && m.away_od && m.handicap)
+                .map(m => ({ minute: parseInt(m.time_str), home: parseFloat(m.home_od!), handicap: m.handicap! }))
+                .sort((a,b) => a.minute - b.minute);
+            setHomeOddsHistory(newHomeHistory);
+        }
+    }
+    runPatternDetection(); // Run analysis after refreshing data
     setIsRefreshing(false);
   };
   
